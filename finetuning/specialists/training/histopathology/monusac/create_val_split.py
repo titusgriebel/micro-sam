@@ -51,6 +51,6 @@ def create_val_split(directory, percentage, organ_type=None):
 
 directory = '/scratch/users/u11644/data/monusac/loaded_data/'
 percentage = 0.05
-organ_type = 'prostate'
-create_val_split(directory, percentage, organ_type)
+# organ_type = 
+create_val_split(directory, percentage)
 
