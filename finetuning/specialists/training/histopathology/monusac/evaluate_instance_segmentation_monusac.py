@@ -45,7 +45,7 @@ def get_val_paths(organ_type=None):
     gt_paths.sort()
     return image_paths, gt_paths
 
-def run_instance_segmentation_with_decoder_inference(model_type, checkpoint, experiment_folder, organ_type): #removed dataset_name as argument
+def run_instance_segmentation_with_decoder_inference(model_type, checkpoint, experiment_folder, organ_type=None): #removed dataset_name as argument
     val_image_paths, val_gt_paths = get_val_paths(organ_type)
     test_image_paths, _ = get_test_paths(organ_type)
     prediction_folder = run_instance_segmentation_with_decoder(
@@ -66,6 +66,7 @@ def eval_instance_segmentation_with_decoder(prediction_folder, experiment_folder
     save_path = os.path.join(experiment_folder, "results", "instance_segmentation_with_decoder.csv")
     res = run_evaluation(gt_paths, pred_paths, save_path=save_path)
     print(res)
+
 
 
 def main():
