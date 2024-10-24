@@ -38,17 +38,21 @@ def get_dataloaders(patch_shape, data_path, organ_type):
         boundaries=False,
         binary=False,
     )
-    val_loader = get_monuseg_loader(
-        path=data_path,
-        patch_shape=patch_shape,
-        batch_size=1,
-        split = "test",
-        organ_type=organ_type,
-        download=True,
-        offsets=None,
-        boundaries=False,
-        binary=False,
-    )
+    if organ_type==None:
+         val_loader = get_monuseg_loader(
+            path=data_path,
+            patch_shape=patch_shape,
+            batch_size=1,
+            split = "test",
+            organ_type=organ_type,
+            download=True,
+            offsets=None,
+            boundaries=False,
+            binary=False,
+         )
+    else:
+         val_loader = None
+         
     return train_loader, val_loader
 
     
@@ -65,14 +69,14 @@ def delete_alpha_channel(path):
          print(f'Image {(os.listdir(path).index(filename))+1} was successfully cleansed of its alpha channel')
 
 def load_and_save_monuseg(directory, organ_type=None):
+    data_path = '/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/download/complete_dataset'
+
     if organ_type != None:
-       data_path = os.path.join('/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/download',f'{organ_type}')
        if not os.path.exists(data_path):
           os.makedirs(data_path)
        image_output_path = os.path.join(directory, organ_type, 'images') 
        label_output_path = os.path.join(directory, organ_type, 'labels') 
     else:
-       data_path = '/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/download/complete_dataset'
        if not os.path.exists(data_path):
           os.makedirs(data_path)
        image_output_path = os.path.join(directory, 'complete_dataset', 'images') 
@@ -98,25 +102,26 @@ def load_and_save_monuseg(directory, organ_type=None):
        tif_label_output_path = os.path.join(label_output_path,f'{counter:04}.tiff')
        tifffile.imwrite(tif_label_output_path, squeezed_label)
        counter+=1
-    for image,label in val_loader:
-       image_array = image.numpy()
-       label_array = label.numpy()
-       #print(f'Image {counter:04} original shape: {np.shape(image_array)}')
-       squeezed_image = image_array.squeeze()
-       squeezed_label = label_array.squeeze()
-       transposed_image_array = squeezed_image.transpose(1,2,0)
-       print(f'image {counter:04} shape: {np.shape(transposed_image_array)}, label {counter:04} shape: {np.shape(squeezed_label)}')
-       tif_image_output_path = os.path.join(image_output_path,f'{counter:04}.tiff')
-       tifffile.imwrite(tif_image_output_path, transposed_image_array)
-       tif_label_output_path = os.path.join(label_output_path,f'{counter:04}.tiff')
-       tifffile.imwrite(tif_label_output_path, squeezed_label)
-       counter+=1
+    if organ_type == None:
+      for image,label in val_loader:
+         image_array = image.numpy()
+         label_array = label.numpy()
+         #print(f'Image {counter:04} original shape: {np.shape(image_array)}')
+         squeezed_image = image_array.squeeze()
+         squeezed_label = label_array.squeeze()
+         transposed_image_array = squeezed_image.transpose(1,2,0)
+         print(f'image {counter:04} shape: {np.shape(transposed_image_array)}, label {counter:04} shape: {np.shape(squeezed_label)}')
+         tif_image_output_path = os.path.join(image_output_path,f'{counter:04}.tiff')
+         tifffile.imwrite(tif_image_output_path, transposed_image_array)
+         tif_label_output_path = os.path.join(label_output_path,f'{counter:04}.tiff')
+         tifffile.imwrite(tif_label_output_path, squeezed_label)
+         counter+=1
     #delete_alpha_channel(image_output_path)
     
         
        
     
-load_and_save_monuseg('/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/loaded_data', organ_type='breast')
+load_and_save_monuseg('/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/loaded_data', organ_type='kidney')
 
 
 # for image, label in train_loader:
