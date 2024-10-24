@@ -45,7 +45,7 @@ def _download_monuseg(path, download, split):
     label_path = os.path.join(path, "labels", split)
     if os.path.exists(im_path) and os.path.exists(label_path):
         return
-
+    
     os.makedirs(path, exist_ok=True)
     zip_path = os.path.join(path, f"monuseg_{split}.zip")
     util.download_source_gdrive(zip_path, URL[split], download=download, checksum=CHECKSUM[split])
