@@ -104,9 +104,10 @@ def get_monuseg_dataset(
     if organ_type is not None:
         # get all patients for multiple organ selection
         all_organ_splits = []
-        for image in ORGAN_SPLITS[organ_type]:
-            all_organ_splits.append(image)
-        print(all_organ_splits)
+        for organ in organ_type:
+            for image in ORGAN_SPLITS[organ]:
+                all_organ_splits.append(image)
+        print(f'{len(all_organ_splits)} images from {len(image_paths)} total dataset images were taken into account')
         image_paths = [_path for _path in image_paths if Path(_path).stem in all_organ_splits]
         label_paths = [_path for _path in label_paths if Path(_path).stem in all_organ_splits]
 
