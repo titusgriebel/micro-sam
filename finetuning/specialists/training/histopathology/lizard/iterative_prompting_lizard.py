@@ -2,7 +2,7 @@ import os
 
 from micro_sam.evaluation import inference
 from micro_sam.evaluation.evaluation import run_evaluation_for_iterative_prompting
-from evaluate_amg_monusac import get_test_paths
+from evaluate_amg_lizard import get_val_paths, get_test_paths
 #from util import get_paths  # comment this and create a custom function with the same name to run int. seg. on your data
 from util import get_model, get_default_arguments
 
@@ -12,7 +12,7 @@ def _run_iterative_prompting(exp_folder, predictor, start_with_box_prompt, use_m
         exp_folder, "start_with_box" if start_with_box_prompt else "start_with_point"
     )
     embedding_folder = os.path.join(exp_folder, "embeddings")
-    image_paths, gt_paths = get_test_paths(organ_type)
+    image_paths, gt_paths = get_test_paths()
     inference.run_inference_with_iterative_prompting(
         predictor=predictor,
         image_paths=image_paths,
