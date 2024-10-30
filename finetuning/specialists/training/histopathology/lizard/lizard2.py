@@ -8,7 +8,7 @@ import h5py
 import imageio.v3 as imageio
 import torch_em
 import cv2
-
+from natsort import natsorted
 from torch_em.transform.label import PerObjectDistanceTransform
 from torch_em.data import MinInstanceSampler
 import micro_sam.training as sam_training
@@ -33,7 +33,7 @@ LABEL_CHECKSUM = "79f22ca83ca535682fba340cbc8bb66b74abd1ead4151ffc8593f204fcb97d
 
 def _extract_images(image_folder, label_folder, output_dir, split):
     image_files = glob(os.path.join(image_folder, "*.png"))
-    split_dict = create_split_dicts(os.path.join('/mnt/lustre-grete/usr/u12649/scratch/data/lizard/lizard_labels/Lizard_Labels/info.csv'))
+    split_dict = create_split_dicts('/mnt/lustre-grete/usr/u12649/scratch/data/lizard/lizard_labels/Lizard_Labels/info.csv')
     output_path = os.path.join(output_dir, split)
     os.makedirs(output_path, exist_ok=True)
     for image_file in tqdm(image_files, desc=f"Extract images from {image_folder}"):
@@ -48,8 +48,8 @@ def _extract_images(image_folder, label_folder, output_dir, split):
 
         labels = loadmat(label_file) 
         segmentation = labels["inst_map"]
-        segmentation = segmentation.astype(np.float32)
-        assert image.dtype == np.float32, 'float32 conversion unsuccessful'
+        # segmentation = segmentation.astype(np.float32)
+        # assert image.dtype == np.float32, 'float32 conversion unsuccessful'
         assert image.shape[:-1] == segmentation.shape
         classes = labels["class"]
 
@@ -57,13 +57,28 @@ def _extract_images(image_folder, label_folder, output_dir, split):
         assert image.shape[1:] == segmentation.shape
         name, _ = os.path.splitext(fname)
         #print(name)
-        output_file = os.path.join(output_path, fname.replace(".png", ".h5"))
+        output_file = os.path.join(output_path, fname.replace(".png", ".h5"))       
         if name in split_dict[split] and not os.path.exists(output_file):
             with h5py.File(output_file, "a") as f:
                 f.create_dataset("image", data=image, compression="gzip")
                 f.create_dataset("labels/segmentation", data=segmentation, compression="gzip")
-                #f.create_dataset("labels/classes", data=classes, compression="gzip")               
+                f.create_dataset("labels/classes", data=classes, compression="gzip")        
 
+def get_tiffs(path, split):
+    output_dir = os.path.join(path, split)
+    os.makedirs((os.path.join(output_dir, 'images')), exist_ok=True)
+    os.makedirs((os.path.join(output_dir, 'labels')), exist_ok=True)
+    for file in glob(os.path.join(path, split, '*.h5')): 
+        with h5py.File(file, 'r') as f:
+            img_data = f['image']
+            label_data = f['labels/segmentation']
+            basename = os.path.basename(file)
+            name, ext = os.path.splitext(basename)
+            img_output_path = os.path.join(output_dir, 'images', f'{name}.tiff')
+            tifffile.imwrite(img_output_path, img_data)
+            label_output_path = os.path.join(output_dir, 'labels', f'{name}.tiff')
+            tifffile.imwrite(label_output_path, label_data)
+    
 
 def _require_lizard_data(path, download, split):
     image_files = glob(os.path.join(path, split, "*.h5"))
@@ -113,28 +128,58 @@ def get_lizard_dataset(path, patch_shape, split, download=False, **kwargs):
         )
 
     _require_lizard_data(path, download, split)
-    data_paths = glob(os.path.join(path, split, "*.h5"))
-    data_paths.sort()
-    print(f'data_paths has {len(data_paths)} items')
-    raw_key = "image"
-    label_key = "labels/segmentation"
+    # data_paths = glob(os.path.join(path, split, "*.h5"))
+    # data_paths.sort()
+    # print(f'data_paths has {len(data_paths)} items')
+    # raw_key = "image"
+    # label_key = "labels/segmentation"
+    get_tiffs(path, split)
+    image_paths = natsorted(glob(os.path.join(path, split, 'images', '*.tiff')))
+    label_paths = natsorted(glob(os.path.join(path, split, 'labels', '*.tiff')))
+    # image_paths = sorted(glob(os.path.join(path, "images", split, "*")))
+    # label_paths = sorted(glob(os.path.join(path, "labels", split, "*")))
     
-    for image in data_paths:
-        with h5py.File(image, 'r') as f:
-            for name, item in f.items():
-                if isinstance(item, h5py.Dataset):
-                    shape = item.shape
-                    dtype = item.dtype
-                    print(f"Image: {image}, Dataset: {name}, Shape: {shape}, Data Type: {dtype}")
+    # for image in data_paths:
+    #     with h5py.File(image, 'r') as f:
+    #         img_data = f['image']
+    #         img_shape = img_data.shape
+    #         img_type = img_data.dtype
+    #         print(f"Image: {image}, Dataset: Image, Shape: {img_shape}, Data Type: {img_type}")
+    #         label_data = f['labels/segmentation']
+    #         label_shape = label_data.shape
+    #         label_type = label_data.dtype
+    #         print(f"Image: {image}, Dataset: Label, Shape: {label_shape}, Data Type: {label_type}")
+
+
+            # for name, item in f.items():
+            #     if isinstance(item, h5py.Dataset):
+            #         shape = item.shape
+            #         dtype = item.dtype
+            #         print(f"Image: {image}, Dataset: {name}, Shape: {shape}, Data Type: {dtype}")
+            #     elif isinstance(item, h5py.Group):
+            #         for key in item.keys():
+            #             ds = item[key]
+            #             shape = ds.shape
+            #             dtype = ds.dtype
+            #             if isinstance(ds, h5py.Dataset):
+            #                 print(f"Label: {image}, Dataset: {name}, Shape: {shape}, Data Type: {dtype}")
+
+
+    #breakpoint()
+    kwargs, _ = util.add_instance_label_transform(
+        kwargs, add_binary_target=True, binary=False, boundaries=False, offsets=None
+    )
+    # return torch_em.default_segmentation_dataset(
+    #     data_paths, raw_key, data_paths, label_key, patch_shape, ndim=2, with_channels=True, **kwargs
+    # )
 
     return torch_em.default_segmentation_dataset(
-        data_paths, raw_key, data_paths, label_key, patch_shape, ndim=2, with_channels=True, **kwargs
+        image_paths, None, label_paths, None, patch_shape, is_seg_dataset=False, **kwargs
     )
-
 
 # TODO implement loading the classification labels
 # TODO implement selecting different tissue types
-# TODO implement train / val / test split (is pre-defined in a csv)
+# TODO implement train / val / test split (is pre-defined in a csv) --> done
 def get_lizard_loader(path, patch_shape, batch_size, split, download=False, **kwargs):
     """Dataloader for the segmentation of nuclei in histopathology. See 'get_lizard_dataset' for details."""
     ds_kwargs, loader_kwargs = util.split_kwargs(
@@ -171,9 +216,7 @@ def get_dataloaders(patch_shape, data_path, split):
     I.e. a tensor of the same spatial shape as `x`, with each object mask having its own ID.
     Important: the ID 0 is reseved for background, and the IDs must be consecutive
     """
-    label_transform = PerObjectDistanceTransform(
-        distances=True, boundary_distances=True, directed_distances=False, foreground=True, instances=True, min_size=25
-    )
+
     raw_transform = sam_training.identity  # the current workflow avoids rescaling the inputs to [-1, 1]
     sampler = MinInstanceSampler(min_num_instances=3)
     split_loader = get_lizard_loader(
@@ -182,6 +225,8 @@ def get_dataloaders(patch_shape, data_path, split):
         batch_size=1,
         split = split,
         download=False,
+        raw_transform=raw_transform,
+        sampler=sampler
         #offsets=None,
         #boundaries=False,
         #binary=False,
@@ -189,18 +234,24 @@ def get_dataloaders(patch_shape, data_path, split):
     return split_loader
 
 
-def load_lizard_dataset(path):
+def load_lizard_dataset(path, complete_dataset=False):
+    if complete_dataset:
+        counter = 0
     for split in ['split1', 'split2', 'split3']:
         split_loader = get_dataloaders(patch_shape=(1,512,512), data_path=path, split=split)
-        counter = 0
-        image_output_path = os.path.join(path, 'loaded_dataset', split, 'images')
-        label_output_path = os.path.join(path, 'loaded_dataset', split, 'labels')
-        if not os.path.exists(image_output_path):
-            os.makedirs(image_output_path)
-        if not os.path.exists(label_output_path):
-            os.makedirs(label_output_path)
-        assert os.listdir(image_output_path) == []
-        assert os.listdir(label_output_path) == []
+
+        if complete_dataset:
+            image_output_path = os.path.join(path, 'loaded_dataset', 'complete_dataset', 'images')
+            label_output_path = os.path.join(path, 'loaded_dataset', 'complete_dataset', 'labels')
+        else:
+            image_output_path = os.path.join(path, 'loaded_dataset', split, 'images')
+            label_output_path = os.path.join(path, 'loaded_dataset', split, 'labels')
+            counter = 0
+        os.makedirs(image_output_path, exist_ok=True)
+        os.makedirs(label_output_path, exist_ok=True)
+        if not complete_dataset:
+            assert os.listdir(image_output_path) == []
+            assert os.listdir(label_output_path) == []
         for image,label in split_loader:
             image_array = image.numpy()
             label_array = label.numpy()
@@ -215,5 +266,8 @@ def load_lizard_dataset(path):
             tifffile.imwrite(tif_label_output_path, squeezed_label)
             counter+=1
 
+def main():
+    load_lizard_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/lizard', complete_dataset=True)
 
-load_lizard_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/lizard')
+if __name__ == "__main__":
+    main()

@@ -32,9 +32,9 @@ def create_val_split(directory, percentage, organ_type=None):
     print('No pre-existing validation set was found. A validation set will be created.')
 
     if not os.path.exists(val_label_path):
-            os.mkdir(val_label_path)
+        os.mkdir(val_label_path)
     if not os.path.exists(val_image_path):
-            os.mkdir(val_image_path)
+        os.mkdir(val_image_path)
     val_count = round(len(image_paths)*percentage)
     print(f'The validation set will consist of {val_count} images.')
     val_indices = random.sample(range(0, (len(image_paths))), val_count)
@@ -45,12 +45,11 @@ def create_val_split(directory, percentage, organ_type=None):
         image_destination = os.path.join(val_image_path,f'{image_paths[item]}')
         label_path = os.path.join(labels_path,f'{label_paths[item]}')
         label_destination = os.path.join(val_label_path,f'{label_paths[item]}')
-        #print(f'Image origin: {image_path}, image destination: {image_destination}')
     
         shutil.move(image_path, image_destination)
         shutil.move(label_path, label_destination)
 
-directory = '/mnt/lustre-grete/usr/u12649/scratch/data/monusac/loaded_data'
+directory = '/mnt/lustre-grete/usr/u12649/scratch/data/lizard/loaded_dataset'
 percentage = 0.05
 # organ_type = 
 create_val_split(directory, percentage)

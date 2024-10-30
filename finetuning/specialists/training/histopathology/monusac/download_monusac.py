@@ -37,6 +37,8 @@ def get_dataloaders(patch_shape, data_path, organ_type):
         offsets=None,
         boundaries=False,
         binary=False,
+        raw_transform=raw_transform,
+        sampler=sampler
     )
     val_loader = get_monusac_loader(
         path=data_path,
@@ -48,6 +50,8 @@ def get_dataloaders(patch_shape, data_path, organ_type):
         offsets=None,
         boundaries=False,
         binary=False,
+        raw_transform=raw_transform,
+        sampler=sampler
     )
     return train_loader, val_loader
 
@@ -115,7 +119,7 @@ def load_and_save_monusac(directory, organ_type=None):
         
        
     
-load_and_save_monusac('/mnt/lustre-grete/usr/u12649/scratch/data/monusac/loaded_data', ['prostate','kidney'])
+load_and_save_monusac('/mnt/lustre-grete/usr/u12649/scratch/data/monusac/loaded_data')
 
 
 # for image, label in train_loader:

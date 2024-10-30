@@ -10,9 +10,12 @@ from util import get_default_arguments, get_pred_paths, VANILLA_MODELS
 
 def get_val_paths(organ_type):
     if organ_type is not None:
-            path = os.path.join('/mnt/lustre-grete/usr/u12649/scratch/data/monusac/loaded_data', organ_type)
+        organ_combination = ''
+        for organ in organ_type:
+            organ_combination = organ_combination + '_' + organ
+        path = os.path.join('/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/loaded_data', organ_combination)
     else:
-        path = '/mnt/lustre-grete/usr/u12649/scratch/data/monusac/loaded_data/complete_dataset'
+        path = '/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/loaded_data/complete_dataset'
     val_image_paths = natsorted(glob(os.path.join(path, 'val_images/*')))
     val_label_paths = natsorted(glob(os.path.join(path,'val_labels/*')))
     print(len(val_image_paths), len(val_label_paths))
@@ -22,9 +25,9 @@ def get_val_paths(organ_type):
 
 def get_test_paths(organ_type):
     if organ_type is not None:
-            path = os.path.join('/mnt/lustre-grete/usr/u12649/scratch/data/monusac/loaded_data', organ_type)
+        path = os.path.join('/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/loaded_data', organ_type)
     else:
-        path = '/mnt/lustre-grete/usr/u12649/scratch/data/monusac/loaded_data/complete_dataset'
+        path = '/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/loaded_data/complete_dataset'
     test_image_paths = natsorted(glob(os.path.join(path, 'images/*')))
     test_label_paths = natsorted(glob(os.path.join(path, 'labels/*')))
     print(len(test_image_paths), len(test_label_paths))
