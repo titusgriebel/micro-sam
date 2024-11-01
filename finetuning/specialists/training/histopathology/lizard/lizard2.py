@@ -36,6 +36,7 @@ def _extract_images(image_folder, label_folder, output_dir, split):
     split_dict = create_split_dicts('/mnt/lustre-grete/usr/u12649/scratch/data/lizard/lizard_labels/Lizard_Labels/info.csv')
     output_path = os.path.join(output_dir, split)
     os.makedirs(output_path, exist_ok=True)
+    counter = 1
     for image_file in tqdm(image_files, desc=f"Extract images from {image_folder}"):
         fname = os.path.basename(image_file)
         label_file = os.path.join(label_folder, fname.replace(".png", ".mat"))
@@ -52,17 +53,18 @@ def _extract_images(image_folder, label_folder, output_dir, split):
         # assert image.dtype == np.float32, 'float32 conversion unsuccessful'
         assert image.shape[:-1] == segmentation.shape
         classes = labels["class"]
-
+        print(f'Image {counter:03} has a shape of {image.shape}')
+        counter += 1
         image = image.transpose((2, 0, 1))
         assert image.shape[1:] == segmentation.shape
         name, _ = os.path.splitext(fname)
         #print(name)
-        output_file = os.path.join(output_path, fname.replace(".png", ".h5"))       
+        output_file = os.path.join(output_path, fname.replace(".png", ".h5"))  
         if name in split_dict[split] and not os.path.exists(output_file):
             with h5py.File(output_file, "a") as f:
                 f.create_dataset("image", data=image, compression="gzip")
                 f.create_dataset("labels/segmentation", data=segmentation, compression="gzip")
-                f.create_dataset("labels/classes", data=classes, compression="gzip")        
+                f.create_dataset("labels/classes", data=classes, compression="gzip")  
 
 def get_tiffs(path, split):
     output_dir = os.path.join(path, split)
@@ -81,9 +83,9 @@ def get_tiffs(path, split):
     
 
 def _require_lizard_data(path, download, split):
-    image_files = glob(os.path.join(path, split, "*.h5"))
-    if len(image_files) > 0:
-        return
+    # image_files = glob(os.path.join(path, split, "*.h5"))
+    # if len(image_files) > 0:
+    #     return
     # print('require_lizard_data executed anyways')
     # os.makedirs(path, exist_ok=True)
 
@@ -109,7 +111,7 @@ def _require_lizard_data(path, download, split):
 
     _extract_images(image_folder1, os.path.join(label_folder, "Labels"), path, split) #returns .h5 for each image containing datasets for image, segmentation label and classification label
     _extract_images(image_folder2, os.path.join(label_folder, "Labels"), path, split)
-
+    breakpoint
     # rmtree(image_folder1)
     # rmtree(image_folder2)
     # rmtree(label_folder)
@@ -216,7 +218,9 @@ def get_dataloaders(patch_shape, data_path, split):
     I.e. a tensor of the same spatial shape as `x`, with each object mask having its own ID.
     Important: the ID 0 is reseved for background, and the IDs must be consecutive
     """
-
+    label_transform = PerObjectDistanceTransform(
+        distances=True, boundary_distances=True, directed_distances=False, foreground=True, instances=True, min_size=25
+    )
     raw_transform = sam_training.identity  # the current workflow avoids rescaling the inputs to [-1, 1]
     sampler = MinInstanceSampler(min_num_instances=3)
     split_loader = get_lizard_loader(
@@ -226,7 +230,8 @@ def get_dataloaders(patch_shape, data_path, split):
         split = split,
         download=False,
         raw_transform=raw_transform,
-        sampler=sampler
+        sampler=sampler,
+        label_transform=label_transform
         #offsets=None,
         #boundaries=False,
         #binary=False,
@@ -237,12 +242,13 @@ def get_dataloaders(patch_shape, data_path, split):
 def load_lizard_dataset(path, complete_dataset=False):
     if complete_dataset:
         counter = 0
+        _path = os.path.join(path, 'loaded_dataset', 'complete_dataset')
     for split in ['split1', 'split2', 'split3']:
         split_loader = get_dataloaders(patch_shape=(1,512,512), data_path=path, split=split)
 
         if complete_dataset:
-            image_output_path = os.path.join(path, 'loaded_dataset', 'complete_dataset', 'images')
-            label_output_path = os.path.join(path, 'loaded_dataset', 'complete_dataset', 'labels')
+            image_output_path = os.path.join(_path, 'images')
+            label_output_path = os.path.join(_path, 'labels')
         else:
             image_output_path = os.path.join(path, 'loaded_dataset', split, 'images')
             label_output_path = os.path.join(path, 'loaded_dataset', split, 'labels')
@@ -267,7 +273,7 @@ def load_lizard_dataset(path, complete_dataset=False):
             counter+=1
 
 def main():
-    load_lizard_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/lizard', complete_dataset=True)
+    load_lizard_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/lizard/', complete_dataset=True)
 
 if __name__ == "__main__":
     main()

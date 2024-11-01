@@ -2,7 +2,7 @@ import os
 
 from micro_sam.evaluation.evaluation import run_evaluation
 from micro_sam.evaluation.inference import run_amg
-from finetuning.specialists.training.histopathology.evaluate_instance_segmentation_pannuke import get_test_paths, get_val_paths
+from evaluate_instance_segmentation_pannuke import get_test_paths, get_val_paths
 
 from util import get_pred_paths, get_default_arguments, VANILLA_MODELS
 

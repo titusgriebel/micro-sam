@@ -26,7 +26,7 @@ def _run_iterative_prompting(exp_folder, predictor, start_with_box_prompt, use_m
 
 
 def _evaluate_iterative_prompting(prediction_root, start_with_box_prompt, exp_folder, organ_type=None):
-    _, gt_paths = get_test_paths(organ_type)
+    _, gt_paths = get_test_paths()
 
     run_evaluation_for_iterative_prompting(
         gt_paths=gt_paths,

@@ -14,7 +14,7 @@ def open_hdf5_file(file_path):
 
 # Replace 'path/to/your/file.h5' with the correct path
 file_path = '/scratch/users/u11644/data/pannuke/pannuke_fold_2.h5'
-open_hdf5_file(file_path)
+# open_hdf5_file(file_path)
 
 
 def create_directory_from_h5(hdf5_file, image_output_dir, label_output_dir):
@@ -23,18 +23,24 @@ def create_directory_from_h5(hdf5_file, image_output_dir, label_output_dir):
         np_images = np.array(images)
         tp_images = np_images.transpose(1,2,3,0)
         instance_labels = f['labels/instances']
+        os.makedirs(image_output_dir, exist_ok=True)
+        os.makedirs(label_output_dir, exist_ok=True)
+        icounter = 1
         for i in range(tp_images.shape[0]):
             img = tp_images[i]
-            uint8_image_data = img.astype(np.uint8)
-            output_path = os.path.join(image_output_dir, f'image_{i}.tiff')
+            uint8_image_data = img
+            output_path = os.path.join(image_output_dir, f'image_{icounter:04}.tiff')
             tifffile.imwrite(output_path, uint8_image_data, dtype=uint8_image_data.dtype)
+            icounter +=1
+        lcounter = 1
         for i in range(instance_labels.shape[0]):
             img = instance_labels[i]
-            uint8_image_data = img.astype(np.uint8)
-            output_path = os.path.join(label_output_dir, f'image_{i}.tiff')
+            uint8_image_data = img
+            output_path = os.path.join(label_output_dir, f'image_{lcounter:04}.tiff')
             tifffile.imwrite(output_path, uint8_image_data, dtype=uint8_image_data.dtype)
+            lcounter += 1
 
-create_directory_from_h5('/scratch/users/u11644/data/pannuke/pannuke_fold_2.h5', '/scratch/users/u11644/data/pannuke_tif/fold2/images', '/scratch/users/u11644/data/pannuke_tif/fold2/labels')
+create_directory_from_h5('/mnt/lustre-grete/usr/u12649/scratch/data/pannuke/pannuke_fold_3.h5', '/mnt/lustre-grete/usr/u12649/scratch/data/pannuke_tif/fold3/images', '/mnt/lustre-grete/usr/u12649/scratch/data/pannuke_tif/fold3/labels')
 
 
         
