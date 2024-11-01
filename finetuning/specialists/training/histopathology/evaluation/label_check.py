@@ -6,9 +6,9 @@ import os
 import PIL
 from PIL import Image
 import cv2
-import skimage.io
-
-
+from skimage import io
+from natsort import natsorted
+import shutil
 def open_hdf5_file(file_path):
   try:
     with h5py.File(file_path, 'r') as f:
@@ -42,28 +42,35 @@ label_path = '/scratch/users/u11644/data/monusac/monusac_test/complete_images'
 
 def check_for_empty_tiff(path):
    empty_count = 0
-   for filename in sorted(os.listdir(path)):
-        image_path = os.path.join(path, filename)
-        with tifffile.TiffFile(image_path) as tif:
-            photo = Image.open(image_path)
+   file_list = natsorted(os.listdir(os.path.join(path, 'labels')))
+   for filename in file_list:
+      image_path = os.path.join(path, 'labels', filename)
+      with tifffile.TiffFile(image_path) as tif:
+            photo = io.imread(image_path)
             data = np.array(photo)
             unique_elements = np.unique(data)
             #print(np.unique(data))
             print(np.shape(data))
             if len(unique_elements) == 1:
-               print(f'Image {(os.listdir(path).index(filename))+1} does not contain labels!')
+               print(f'Image {os.path.basename(image_path)} = {filename} does not contain labels and will be removed.')
                empty_count+=1
+               os.remove(os.path.join(image_path))
+               os.remove(os.path.join(path,'images',filename))
+               assert len(os.listdir(os.path.join(path, 'labels'))) == len(os.listdir(os.path.join(path, 'images')))
+
    print(f'{empty_count} labels were empty')
+   label_len = len(os.listdir(os.path.join(path, 'labels')))
+   print(f'There are {label_len} images left')
             
 
-#check_for_empty_tiff(image_path)
+check_for_empty_tiff('/mnt/lustre-grete/usr/u12649/scratch/data/pannuke_tif/fold3')
    
 def delete_alpha_channel(path):
    for filename in os.listdir(path):
       image_path = os.path.join(path, filename)
       #with tifffile.TiffFile(image_path) as tif:
       data = skimage.io.imread(image_path)
-      print(data.shape)
+      #print(data.shape)
          #data = np.array(Image.open(image_path))
       if data.shape[-1] == 4:
          cleansed_data = data[:,:,:3]
@@ -71,7 +78,7 @@ def delete_alpha_channel(path):
          output_path = os.path.join(path, f'{filename}')
          tifffile.imwrite(output_path, cleansed_data)
          print(f'Image {(os.listdir(path).index(filename))+1} was successfully cleansed of its alpha channel')
-delete_alpha_channel(image_path)
+#delete_alpha_channel(image_path)
 
 # data = skimage.io.imread('/scratch/users/u11644/data/monusac/monusac_test/complete_images/0001.tiff')
 # shape = data.shape

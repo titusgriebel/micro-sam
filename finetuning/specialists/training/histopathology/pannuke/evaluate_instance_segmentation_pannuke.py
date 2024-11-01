@@ -1,5 +1,6 @@
 import os
-
+from natsort import natsorted
+from glob import glob
 from micro_sam.evaluation.evaluation import run_evaluation
 from micro_sam.evaluation.inference import run_instance_segmentation_with_decoder
 
@@ -7,34 +8,19 @@ from micro_sam.evaluation.inference import run_instance_segmentation_with_decode
 from util import get_pred_paths, get_default_arguments
 
 def get_test_paths():
-    image_path = '/scratch/users/u11644/data/pannuke_tif/fold3/images'
-    label_path = '/scratch/users/u11644/data/pannuke_tif/fold3/labels'
-    image_paths = []
-    gt_paths = []
-    for filename in os.listdir(image_path):
-        filepath = os.path.join(image_path,filename)
-        image_paths.append(filepath)
-    image_paths.sort()
-    for labelname in os.listdir(label_path):
-        gt_path = os.path.join(label_path,labelname)
-        gt_paths.append(gt_path)
-    gt_paths.sort()
+    image_path = '/mnt/lustre-grete/usr/u12649/scratch/data/pannuke_tif/fold3/images'
+    label_path = '/mnt/lustre-grete/usr/u12649/scratch/data/pannuke_tif/fold3/labels'
+    image_paths = natsorted(glob(os.path.join(image_path, '*.tiff')))
+    gt_paths = natsorted(glob(os.path.join(label_path, '*.tiff')))
+    print(len(image_paths), len(gt_paths))
     return image_paths, gt_paths
     
     
 def get_val_paths():
-    image_path = '/scratch/users/u11644/data/pannuke_tif/fold2/val_images'
-    label_path = '/scratch/users/u11644/data/pannuke_tif/fold2/val_labels'
-    image_paths =[]
-    gt_paths = []
-    for filename in os.listdir(image_path):
-        filepath = os.path.join(image_path,filename)
-        image_paths.append(filepath)
-    image_paths.sort()
-    for labelname in os.listdir(label_path):
-        gt_path = os.path.join(label_path,labelname)
-        gt_paths.append(gt_path)
-    gt_paths.sort()
+    image_path = '/mnt/lustre-grete/usr/u12649/scratch/data/pannuke_tif/fold2/val_images'
+    label_path = '/mnt/lustre-grete/usr/u12649/scratch/data/pannuke_tif/fold2/val_labels'
+    image_paths = natsorted(glob(os.path.join(image_path, '*.tiff')))
+    gt_paths = natsorted(glob(os.path.join(label_path, '*.tiff')))
     return image_paths, gt_paths
 
 def run_instance_segmentation_with_decoder_inference(model_type, checkpoint, experiment_folder): #removed dataset_name as argument

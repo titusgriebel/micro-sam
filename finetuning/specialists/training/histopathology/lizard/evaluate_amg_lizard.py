@@ -52,18 +52,21 @@ def get_all_paths(organ_type=None):
 
 def get_val_paths():
     path = '/mnt/lustre-grete/usr/u12649/scratch/data/lizard/loaded_dataset/complete_dataset'
-    val_image_paths = glob(os.path.join(path, 'val_images/*.tiff'))
-    val_label_paths = glob(os.path.join(path, 'val_labels/*.tiff'))
+    val_image_paths = natsorted(glob(os.path.join(path, 'val_images/*.tiff')))
+    val_label_paths = natsorted(glob(os.path.join(path, 'val_labels/*.tiff')))
     assert len(val_image_paths) == len(val_label_paths)
     return val_image_paths, val_label_paths
 
 def get_test_paths():
     path = '/mnt/lustre-grete/usr/u12649/scratch/data/lizard/loaded_dataset/complete_dataset'
-    test_image_paths = glob(os.path.join(path, 'images/*.tiff'))
-    test_label_paths = glob(os.path.join(path, 'labels/*.tiff'))
+    test_image_paths = natsorted(glob(os.path.join(path, 'images/*.tiff')))
+    test_label_paths = natsorted(glob(os.path.join(path, 'labels/*.tiff')))
     assert len(test_image_paths) == len(test_label_paths)
     return test_image_paths, test_label_paths
-
+# test, test1 = get_test_paths()
+# val, val1 = get_val_paths()
+# print(len(test), len(test1), len(val), len(val1))
+# breakpoint()
 # def get_test_paths(organ_type):
 #     assert organ_type is None
 #     if organ_type is not None:

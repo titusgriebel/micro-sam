@@ -2,32 +2,37 @@ import os
 import random
 import shutil
 
-def create_val_split(directory, percentage, organ_type=None):
+def create_val_split(directory, percentage, organ_type=None, split=None):
+    if split is None:
+        path = os.path.join(directory, 'complete_dataset')
+    else:
+        path = os.path.join(directory, split)
     if organ_type is not None:    
         
-        labels_path = os.path.join(directory,organ_type,'labels')
-        images_path = os.path.join(directory,organ_type,'images')
+        labels_path = os.path.join(directory, organ_type, 'labels')
+        images_path = os.path.join(directory, organ_type, 'images')
         
         label_paths = os.listdir(labels_path)
         image_paths = os.listdir(images_path)
         
         image_paths.sort()
         label_paths.sort()
-        val_label_path = os.path.join(directory,organ_type,'val_labels')
-        val_image_path = os.path.join(directory,organ_type,'val_images')
+        val_label_path = os.path.join(directory, organ_type, 'val_labels')
+        val_image_path = os.path.join(directory, organ_type, 'val_images')
     else:
-        labels_path = os.path.join(directory,'complete_dataset','labels')
-        images_path = os.path.join(directory,'complete_dataset','images')
         
+        labels_path = os.path.join(path, 'labels')
+        images_path = os.path.join(path, 'images')
         label_paths = os.listdir(labels_path)
         image_paths = os.listdir(images_path)
         image_paths.sort()
         label_paths.sort()
 
-        val_label_path = os.path.join(directory,'complete_dataset','val_labels')
-        val_image_path = os.path.join(directory,'complete_dataset','val_images')
+        val_label_path = os.path.join(path, 'val_labels')
+        val_image_path = os.path.join(path, 'val_images')
     
     if os.path.exists(val_image_path):
+        assert val_image_path == '/mnt/lustre-grete/usr/u12649/scratch/data/lizard/loaded_dataset/complete_dataset/val_images', 'PathError'
         assert os.listdir(val_image_path) == [], 'Validation split already exists'
     print('No pre-existing validation set was found. A validation set will be created.')
 
