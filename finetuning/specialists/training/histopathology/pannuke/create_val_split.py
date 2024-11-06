@@ -6,7 +6,32 @@ from glob import glob
 import numpy as np
 from skimage.io import imread
 import tifffile
+from skimage import io
 
+def check_for_empty_tiff(path):
+   empty_count = 0
+   file_list = natsorted(os.listdir(os.path.join(path, 'labels')))
+   for filename in file_list:
+      image_path = os.path.join(path, 'labels', filename)
+      with tifffile.TiffFile(image_path) as tif:
+            photo = io.imread(image_path)
+            data = np.array(photo)
+            unique_elements = np.unique(data)
+            #print(np.unique(data))
+            print(np.shape(data))
+            if len(unique_elements) == 1:
+               print(f'Image {os.path.basename(image_path)} = {filename} does not contain labels and will be removed.')
+               empty_count+=1
+               os.remove(os.path.join(image_path))
+               os.remove(os.path.join(path,'images',filename))
+               assert len(os.listdir(os.path.join(path, 'labels'))) == len(os.listdir(os.path.join(path, 'images')))
+
+   print(f'{empty_count} labels were empty')
+   label_len = len(os.listdir(os.path.join(path, 'labels')))
+   print(f'There are {label_len} images left')
+            
+
+check_for_empty_tiff('/mnt/lustre-grete/usr/u12649/scratch/data/pannuke/loaded_dataset/complete_dataset')
 def create_val_split(directory, val_percentage, test_percentage, custom_name=None, organ_type=None, split=None, random_seed=42):
     if split is None:
         path = os.path.join(directory, 'complete_dataset')
@@ -101,7 +126,7 @@ def create_val_split(directory, val_percentage, test_percentage, custom_name=Non
     assert len(os.listdir(os.path.join(train_label_dst))) == len(os.listdir(os.path.join(train_image_dst))), 'label / image count mismatch in train set'
     print(f'Train set: {len(os.listdir(os.path.join(train_image_dst)))} images;  val set: {len(os.listdir(os.path.join(val_image_dst)))} images; test set: {len(os.listdir(os.path.join(test_image_dst)))}')
 
-directory = '/mnt/lustre-grete/usr/u12649/scratch/data/lizard/loaded_dataset'
+directory = '/mnt/lustre-grete/usr/u12649/scratch/data/pannuke/loaded_dataset'
 val_percentage = 0.05
 test_percentage = 0.95
 # organ_type = 
@@ -114,4 +139,4 @@ def check_lynsec(path):
         npdata = tifffile.imread(image_path)
         print(npdata.shape)
 
-check_lynsec('/mnt/lustre-grete/usr/u12649/scratch/data/lizard/loaded_dataset/complete_dataset/test2')
+check_lynsec('/mnt/lustre-grete/usr/u12649/scratch/data/pannuke/loaded_dataset/complete_dataset/test2')

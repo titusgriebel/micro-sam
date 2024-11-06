@@ -1,11 +1,12 @@
 import torch
-
+import os
 from torch_em.data import MinInstanceSampler
 from torch_em.util.debug import check_loader
 from torch_em.data.datasets import get_pannuke_loader
 from torch_em.transform.label import PerObjectDistanceTransform
-
+import tifffile
 import micro_sam.training as sam_training
+import numpy as np
 
 
 def get_dataloaders(patch_shape, data_path):
@@ -47,22 +48,65 @@ def get_dataloaders(patch_shape, data_path):
         num_workers=16,
         download=True,
         shuffle=True,
-        label_transform=label_transform,
+        #label_transform=label_transform,
+        raw_transform=raw_transform,
+        label_dtype=torch.float32,
+        sampler=sampler,
+        ndim=2,
+    )
+    test_loader = get_pannuke_loader(
+        path=data_path,
+        patch_shape=patch_shape,
+        batch_size=1,
+        folds=["fold_3"],
+        num_workers=16,
+        download=True,
+        shuffle=True,
         raw_transform=raw_transform,
         label_dtype=torch.float32,
         sampler=sampler,
         ndim=2,
     )
 
-    return train_loader, val_loader
+    return train_loader, val_loader, test_loader
 
 
 def visualize_images(data_path):
-    train_loader, val_loader = get_dataloaders(patch_shape=(1, 512, 512), data_path=data_path)
+    train_loader, val_loader, test_loader = get_dataloaders(patch_shape=(1, 512, 512), data_path=data_path)
 
     # let's visualize train loader first
     check_loader(train_loader, 8, plt=True, save_path="./fig.png")
 
 
-if __name__ == "__main__":
-    visualize_images(data_path="/scratch/projects/nim00007/sam/data/pannuke")
+
+def load_pannuke_dataset(path):
+    counter = 1
+    _path = os.path.join(path, 'loaded_dataset', 'complete_dataset')
+    _, __, he_loader = get_dataloaders(patch_shape=(1,256,256), data_path=path)
+    print(len(he_loader))
+    image_output_path = os.path.join(_path, 'images')
+    label_output_path = os.path.join(_path, 'labels')
+    
+    os.makedirs(image_output_path, exist_ok=True)
+    os.makedirs(label_output_path, exist_ok=True)
+    for image, label in he_loader:
+        image_array = image.numpy()
+        label_array = label.numpy()
+        squeezed_image = image_array.squeeze()
+        label_data = label_array.squeeze()
+        
+        transposed_image_array = squeezed_image.transpose(1,2,0)
+        print(f'image {counter:04} shape: {np.shape(transposed_image_array)}, label {counter:04} shape: {np.shape(label_data)}')
+        assert np.shape(transposed_image_array)[0] == 256, f'Shape error in image {counter:04}'
+        assert np.shape(transposed_image_array)[1] == 256, f'Shape error in image {counter:04}'
+        assert np.shape(transposed_image_array)[2] == 3, f'Shape error in image {counter:04}'
+        assert np.shape(label_data)[0] == 256, f'Shape error in label {counter:04}'
+        assert np.shape(label_data)[0] == 256, f'Shape error in label {counter:04}'
+        tif_image_output_path = os.path.join(image_output_path,f'{counter:04}.tiff')
+        tifffile.imwrite(tif_image_output_path, transposed_image_array)
+        tif_label_output_path = os.path.join(label_output_path,f'{counter:04}.tiff')
+        tifffile.imwrite(tif_label_output_path, label_data)
+        counter+=1
+    print('All images have a confirmed shape of (256, 256, 3) and all labels have a shape of (256,256)')
+
+load_pannuke_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/pannuke')

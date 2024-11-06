@@ -4,7 +4,7 @@ from tqdm import tqdm
 from glob import glob
 from pathlib import Path
 from typing import List, Optional
-import numpy as np
+
 import imageio.v3 as imageio
 
 import torch_em
@@ -45,7 +45,7 @@ def _download_monuseg(path, download, split):
     label_path = os.path.join(path, "labels", split)
     if os.path.exists(im_path) and os.path.exists(label_path):
         return
-    
+
     os.makedirs(path, exist_ok=True)
     zip_path = os.path.join(path, f"monuseg_{split}.zip")
     util.download_source_gdrive(zip_path, URL[split], download=download, checksum=CHECKSUM[split])
@@ -92,7 +92,7 @@ def _process_monuseg(path, split):
 
 
 def get_monuseg_dataset(
-    path, patch_shape, split, organ_type=None, download=False, debug=False,
+    path, patch_shape, split, organ_type=None, download=False,
     offsets=None, boundaries=False, binary=False, **kwargs
 ):
     """Dataset from https://monuseg.grand-challenge.org/Data/
@@ -100,28 +100,18 @@ def get_monuseg_dataset(
     _download_monuseg(path, download, split)
     image_paths = sorted(glob(os.path.join(path, "images", split, "*")))
     label_paths = sorted(glob(os.path.join(path, "labels", split, "*")))
-    if organ_type is not None:
+    organ_type = [organ_type, '']
+    if split == "train" and organ_type is not None:
         # get all patients for multiple organ selection
-        all_organ_splits = []
-        for organ in organ_type:
-            for image in ORGAN_SPLITS[organ]:
-                all_organ_splits.append(image)
-        print(f'{len(all_organ_splits)} images from {len(image_paths)} total dataset images were taken into account')
+        all_organ_splits = sum([ORGAN_SPLITS[organ_type]])
+
         image_paths = [_path for _path in image_paths if Path(_path).stem in all_organ_splits]
         label_paths = [_path for _path in label_paths if Path(_path).stem in all_organ_splits]
 
-    #elif split == "test" and organ_type is not None:
+    elif split == "test" and organ_type is not None:
         # we don't have organ splits in the test dataset
-        #raise ValueError("The test split does not have any organ informations, please pass `organ_type=None`")
-    assert len(image_paths) == len(label_paths) != 0
-    if debug:
-        for image in image_paths:
-            image = imageio.imread(image)
-            # image = image.astype(np.float32)
-            print(f'Image datatype: {image.dtype}')
-            unique_values = np.unique(image)
-            print("Max value:", max(unique_values))
-            print("Min value:", min(unique_values))
+        raise ValueError("The test split does not have any organ information, please pass `organ_type=None`")
+
     kwargs, _ = util.add_instance_label_transform(
         kwargs, add_binary_target=True, binary=binary, boundaries=boundaries, offsets=offsets
     )
@@ -143,11 +133,3 @@ def get_monuseg_loader(
     )
     loader = torch_em.get_data_loader(dataset, batch_size, **loader_kwargs)
     return loader
-
-
-def testing():
-    for split in ['train', 'test']:
-        _ = get_monuseg_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/download/complete_dataset',(512,512), split, debug=True)
-
-
-testing()

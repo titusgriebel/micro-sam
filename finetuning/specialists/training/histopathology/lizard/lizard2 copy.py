@@ -35,20 +35,14 @@ def _extract_images(image_folder, label_folder, output_dir, split):
     split_dict = create_split_dicts('/mnt/lustre-grete/usr/u12649/scratch/data/lizard/lizard_labels/Lizard_Labels/info.csv')
     output_path = os.path.join(output_dir, split)
     os.makedirs(output_path, exist_ok=True)
+    counter = 1
     for image_file in tqdm(image_files, desc=f"Extract images from {image_folder}"):
         fname = os.path.basename(image_file)
         label_file = os.path.join(label_folder, fname.replace(".png", ".mat"))
         assert os.path.exists(label_file), label_file
 
         image = imageio.imread(image_file)
-        # image = image.astype(np.float32)
-        print(f'Image datatype: {image.dtype}')
-        unique_values = np.unique(image)
-        print("Max value:", max(unique_values))
-        print("Min value:", min(unique_values))
-        
-
-        breakpoint()
+        image = image.astype(np.float32)
         assert image.ndim == 3 and image.shape[-1] == 3
         assert image.dtype == np.float32, 'float32 conversion unsuccessful'
 
@@ -89,8 +83,8 @@ def get_tiffs(path, split):
 
 def _require_lizard_data(path, download, split):
     image_files = glob(os.path.join(path, split, "*.h5"))
-    # if len(image_files) > 0:
-    #     return
+    if len(image_files) > 0:
+        return
     # print('require_lizard_data executed anyways')
     # os.makedirs(path, exist_ok=True)
 
@@ -207,27 +201,33 @@ def get_dataloaders(patch_shape, data_path, split):
     return split_loader
 
 
-def load_lizard_dataset(path):
-    counter = 1
-    _path = os.path.join(path, 'loaded_dataset', 'complete_dataset')
+def load_lizard_dataset(path, complete_dataset=False):
+    if complete_dataset:
+        counter = 0
+        _path = os.path.join(path, 'loaded_dataset', 'complete_dataset')
     for split in ['split1', 'split2', 'split3']:
         split_loader = get_dataloaders(patch_shape=(1,512,512), data_path=path, split=split)
 
-        image_output_path = os.path.join(_path, 'images')
-        label_output_path = os.path.join(_path, 'labels')
-        
+        if complete_dataset:
+            image_output_path = os.path.join(_path, 'images')
+            label_output_path = os.path.join(_path, 'labels')
+        else:
+            image_output_path = os.path.join(path, 'loaded_dataset', split, 'images')
+            label_output_path = os.path.join(path, 'loaded_dataset', split, 'labels')
+            counter = 0
         os.makedirs(image_output_path, exist_ok=True)
         os.makedirs(label_output_path, exist_ok=True)
+        if not complete_dataset:
+            assert os.listdir(image_output_path) == []
+            assert os.listdir(label_output_path) == []
         for image, label in split_loader:
             image_array = image.numpy()
             label_array = label.numpy()
+            print(f'Label shape: {np.shape(label_array)}')
             squeezed_image = image_array.squeeze()
             label_data = label_array.squeeze()
-            
-                
-            # label_data = new_label.numpy()
-            # num_zeros = (label_data == 0).sum().item()
-            # print(f"Number of 0s in the new label {counter:04}: {num_zeros}")
+            num_zeros = (label_data == 0).sum().item()
+            print(f"Number of 0s in the new label {counter:04}: {num_zeros}")
             # #breakpoint()
             
             transposed_image_array = squeezed_image.transpose(1,2,0)
@@ -238,5 +238,8 @@ def load_lizard_dataset(path):
             tifffile.imwrite(tif_label_output_path, label_data)
             counter+=1
 
-#load_cryonuseg_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/lizard')
-_require_lizard_data(path='/mnt/lustre-grete/usr/u12649/scratch/data/lizard/', download=False, split='split1')
+def main():
+    load_lizard_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/lizard/', complete_dataset=True)
+
+if __name__ == "__main__":
+    main()

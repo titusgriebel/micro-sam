@@ -1,11 +1,28 @@
 import os
-
+from glob import glob
+from natsort import natsorted
 from micro_sam.evaluation.evaluation import run_evaluation
 from micro_sam.evaluation.inference import run_amg
-from evaluate_instance_segmentation_pannuke import get_test_paths, get_val_paths
+#from evaluate_instance_segmentation_monusac import get_test_paths, get_val_paths
 
-from util import get_pred_paths, get_default_arguments, VANILLA_MODELS
+from util_2 import get_default_arguments, get_pred_paths, VANILLA_MODELS
 
+
+def get_val_paths():
+    path = '/mnt/lustre-grete/usr/u12649/scratch/data/pannuke/loaded_dataset/complete_dataset/test2'
+    val_image_paths = natsorted(glob(os.path.join(path, 'val_images/*')))
+    val_label_paths = natsorted(glob(os.path.join(path,'val_labels/*')))
+    print(len(val_image_paths), len(val_label_paths))
+
+    return val_image_paths, val_label_paths
+    
+
+def get_test_paths():
+    path = '/mnt/lustre-grete/usr/u12649/scratch/data/pannuke/loaded_dataset/complete_dataset/test2'
+    test_image_paths = natsorted(glob(os.path.join(path, 'test_images/*')))
+    test_label_paths = natsorted(glob(os.path.join(path, 'test_labels/*')))
+    print(len(test_image_paths), len(test_label_paths))
+    return test_image_paths, test_label_paths
 
 def run_amg_inference(model_type, checkpoint, experiment_folder):
     val_image_paths, val_gt_paths = get_val_paths()
@@ -19,7 +36,6 @@ def run_amg_inference(model_type, checkpoint, experiment_folder):
         test_image_paths
     )
     return prediction_folder
-
 
 def eval_amg(prediction_folder, experiment_folder):
     print("Evaluating", prediction_folder)

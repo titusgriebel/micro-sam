@@ -83,14 +83,14 @@ def load_and_save_monuseg(directory, organ_type=None):
         image_output_path = os.path.join(directory, organ_combination, 'images') 
         label_output_path = os.path.join(directory, organ_combination, 'labels') 
     else:
-        image_output_path = os.path.join(directory, 'complete_dataset', 'images') 
-        label_output_path = os.path.join(directory, 'complete_dataset', 'labels')
+        image_output_path = os.path.join(directory, 'test ', 'complete_dataset', 'images') 
+        label_output_path = os.path.join(directory,  'test', 'complete_dataset', 'labels')
     train_loader, val_loader = get_dataloaders(patch_shape=(1, 512, 512),data_path=data_path, organ_type=organ_type)
     counter = 1
     os.makedirs(image_output_path, exist_ok=True)
     os.makedirs(label_output_path, exist_ok=True)
-    assert os.listdir(image_output_path) == [], 'Images are loaded already'
-    assert os.listdir(label_output_path) == [], 'Labels are loaded already'
+    # assert os.listdir(image_output_path) == [], 'Images are loaded already'
+    # assert os.listdir(label_output_path) == [], 'Labels are loaded already'
     for image,label in train_loader:
         image_array = image.numpy()
         label_array = label.numpy()
