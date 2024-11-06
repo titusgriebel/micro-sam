@@ -13,12 +13,21 @@ def create_val_split(directory, val_percentage, test_percentage, custom_name=Non
     else:
         path = os.path.join(directory, split)
     if custom_name is not None:
-        
         labels_src_path = os.path.join(path, 'labels')
         images_src_path = os.path.join(path, 'images')
         label_list = natsorted(glob(os.path.join(labels_src_path, '*.tiff')))
-        image_list = natsorted(glob(os.path.join(images_src_path, '*.tiff')))
-        assert len(label_list) == len(image_list)
+        invalid_image_list = natsorted(glob(os.path.join(images_src_path, '*.tiff')))
+        assert len(label_list) == len(invalid_image_list)
+        valid_count = 0
+        image_list = []
+        for image in invalid_image_list:
+            data = tifffile.imread(image)
+            print(data.shape)
+            if data.shape[2] == 3:
+                image_list.append(image)
+                valid_count += 1
+        print(f'{valid_count} from {len(invalid_image_list)} images were valid and did not have shape[2] != 3.')
+
         # label_src_paths = os.listdir(labels_src_path)
         # image_src_paths = os.listdir(images_src_path)
         # image_src_paths.sort()
@@ -30,10 +39,6 @@ def create_val_split(directory, val_percentage, test_percentage, custom_name=Non
         test_image_dst = os.path.join(path, custom_name, 'test_images')
         train_label_dst = os.path.join(path, custom_name, 'train_labels')
         train_image_dst = os.path.join(path, custom_name, 'train_images')
-    
-    
-            
-
     os.makedirs(val_label_dst, exist_ok=True)
     os.makedirs(val_image_dst, exist_ok=True)
     os.makedirs(test_label_dst, exist_ok=True)
@@ -46,10 +51,7 @@ def create_val_split(directory, val_percentage, test_percentage, custom_name=Non
     assert os.listdir(test_label_dst) == [], 'Test split already exists'
     assert os.listdir(train_image_dst) == [], 'Train split already exists'
     assert os.listdir(train_label_dst) == [], 'Train split already exists'
-    print('No pre-existing validation or test set was found. A validation set will be created.')
-
-
-  
+    print('No pre-existing validation or test set was found. A validation set will be created.')  
     val_count = round(len(image_list)*val_percentage)
     test_count = round(len(image_list)*test_percentage)
     print(f'The validation set will consist of {val_count} images.')
@@ -101,17 +103,17 @@ def create_val_split(directory, val_percentage, test_percentage, custom_name=Non
     assert len(os.listdir(os.path.join(train_label_dst))) == len(os.listdir(os.path.join(train_image_dst))), 'label / image count mismatch in train set'
     print(f'Train set: {len(os.listdir(os.path.join(train_image_dst)))} images;  val set: {len(os.listdir(os.path.join(val_image_dst)))} images; test set: {len(os.listdir(os.path.join(test_image_dst)))}')
 
-directory = '/mnt/lustre-grete/usr/u12649/scratch/data/lizard/loaded_dataset'
+directory = '/mnt/lustre-grete/usr/u12649/scratch/data/tnbc/loaded_dataset'
 val_percentage = 0.05
 test_percentage = 0.95
 # organ_type = 
-create_val_split(directory, val_percentage, test_percentage, custom_name='test2')
+#create_val_split(directory, val_percentage, test_percentage, custom_name='test3')
 
 def check_lynsec(path):
-    labels_dir = os.path.join(path, 'test_labels')
+    labels_dir = os.path.join(path, 'test_images')
     for image in os.listdir(labels_dir):
         image_path = os.path.join(labels_dir, image)
         npdata = tifffile.imread(image_path)
         print(npdata.shape)
 
-check_lynsec('/mnt/lustre-grete/usr/u12649/scratch/data/lizard/loaded_dataset/complete_dataset/test2')
+check_lynsec('/mnt/lustre-grete/usr/u12649/scratch/data/tnbc/loaded_dataset/complete_dataset/test3')

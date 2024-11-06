@@ -9,7 +9,7 @@ from util_2 import get_default_arguments, get_pred_paths, VANILLA_MODELS
 
 
 def get_val_paths():
-    path = '/mnt/lustre-grete/usr/u12649/scratch/data/lizard/loaded_dataset/complete_dataset/test2'
+    path = '/mnt/lustre-grete/usr/u12649/scratch/data/tnbc/loaded_dataset/complete_dataset/test3'
     val_image_paths = natsorted(glob(os.path.join(path, 'val_images/*')))
     val_label_paths = natsorted(glob(os.path.join(path,'val_labels/*')))
     print(len(val_image_paths), len(val_label_paths))
@@ -18,7 +18,7 @@ def get_val_paths():
     
 
 def get_test_paths():
-    path = '/mnt/lustre-grete/usr/u12649/scratch/data/lizard/loaded_dataset/complete_dataset/test2'
+    path = '/mnt/lustre-grete/usr/u12649/scratch/data/tnbc/loaded_dataset/complete_dataset/test3'
     test_image_paths = natsorted(glob(os.path.join(path, 'test_images/*')))
     test_label_paths = natsorted(glob(os.path.join(path, 'test_labels/*')))
     print(len(test_image_paths), len(test_label_paths))
