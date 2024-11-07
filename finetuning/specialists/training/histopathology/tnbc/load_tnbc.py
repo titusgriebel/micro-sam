@@ -6,7 +6,7 @@ import tifffile
 import numpy as np
 from torch_em.transform.label import PerObjectDistanceTransform
 from torch_em.data import MinInstanceSampler
-import micro_sam.training as sam_training
+#import micro_sam.training as sam_training
 from scipy.io import loadmat
 
 def get_dataloaders(patch_shape, data_path):
@@ -58,4 +58,7 @@ def load_tnbc_dataset(path):
         tifffile.imwrite(tif_label_output_path, label_data)
         counter+=1
 
-load_tnbc_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/tnbc')
+#load_tnbc_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/tnbc')
+
+from tnbc import get_tnbc_dataset
+get_tnbc_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/tnbc/test',(512,512),download=True)

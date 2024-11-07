@@ -47,7 +47,7 @@ def _extract_images(image_folder, label_folder, output_dir, split):
         print("Max value:", max(unique_values))
         print("Min value:", min(unique_values))
         
-
+         
         breakpoint()
         assert image.ndim == 3 and image.shape[-1] == 3
         assert image.dtype == np.float32, 'float32 conversion unsuccessful'

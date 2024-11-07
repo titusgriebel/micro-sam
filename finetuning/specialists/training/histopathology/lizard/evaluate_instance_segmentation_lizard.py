@@ -5,7 +5,7 @@ from micro_sam.evaluation.inference import run_instance_segmentation_with_decode
 
 
 from util_2 import get_pred_paths, get_default_arguments
-from evaluate_amg_cryonuseg import get_test_paths, get_val_paths
+from evaluate_amg_lizard import get_test_paths, get_val_paths
 
 def run_instance_segmentation_with_decoder_inference(model_type, checkpoint, experiment_folder): #removed dataset_name as argument
     val_image_paths, val_gt_paths = get_val_paths()
