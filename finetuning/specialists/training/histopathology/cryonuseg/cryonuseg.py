@@ -97,8 +97,6 @@ def get_cryonuseg_dataset(
         unique_values = np.unique(image)
         print("Max value:", max(unique_values))
         print("Min value:", min(unique_values))
-        
-         
     return torch_em.default_segmentation_dataset(
         raw_paths=raw_paths,
         raw_key=None,
