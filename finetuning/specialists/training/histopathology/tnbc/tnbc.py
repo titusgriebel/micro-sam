@@ -4,7 +4,7 @@ in H&E stained histopathology images.
 The dataset is located at https://doi.org/10.5281/zenodo.1175282.
 Please cite it if you use this dataset for your research.
 """
-
+import numpy as np
 import os
 import shutil
 from glob import glob
@@ -41,7 +41,11 @@ def _preprocess_images(path):
         raw = imageio.imread(rpath)
         raw = raw[..., :-1].transpose(2, 0, 1)  # remove 4th alpha channel (seems like an empty channel).
         label = imageio.imread(lpath)
-
+        # image = raw
+        # print(f'Image datatype: {image.dtype}')
+        # unique_values = np.unique(image)
+        # print("Max value:", max(unique_values))
+        # print("Min value:", min(unique_values))
         vol_path = os.path.join(preprocessed_dir, f"{Path(lpath).stem}.h5")
 
         with h5py.File(vol_path, "w") as f:
@@ -125,8 +129,7 @@ def get_tnbc_dataset(
         The segmentation dataset.
     """
     # label_choice = "instances"  # semantic / instances
-    if os.listdir((os.path.join(path, 'preprocessed'))) is []:
-        volume_paths = get_tnbc_paths(path, download)
+    volume_paths = get_tnbc_paths(path, download)
     get_tiffs(path)
     image_paths = natsorted(glob(os.path.join(path, 'images', '*.tiff')))
     label_paths = natsorted(glob(os.path.join(path, 'labels', '*.tiff')))

@@ -119,7 +119,7 @@ def load_and_save_monusac(directory, organ_type=None):
         
        
     
-load_and_save_monusac('/mnt/lustre-grete/usr/u12649/scratch/data/monusac/loaded_data')
+load_and_save_monusac('/mnt/lustre-grete/usr/u12649/scratch/data/monusac/test')
 
 
 # for image, label in train_loader:

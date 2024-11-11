@@ -1,236 +1,428 @@
 import os
-import argparse
-import warnings
-from glob import glob
+import hashlib
+import inspect
+import requests
+from tqdm import tqdm
+from warnings import warn
+from subprocess import run
+from packaging import version
+from shutil import copyfileobj, which
 
-from torch_em.data import datasets
+import zipfile
+import numpy as np
+from xml.dom import minidom
+from skimage.draw import polygon
 
-from micro_sam.util import get_sam_model
-from micro_sam.evaluation.livecell import _get_livecell_paths
+import torch
+
+import torch_em
+from torch_em.transform import get_raw_transform
+from torch_em.transform.generic import ResizeLongestSideInputs, Compose
+
+try:
+    import gdown
+except ImportError:
+    gdown = None
+
+try:
+    from tcia_utils import nbia
+except ModuleNotFoundError:
+    nbia = None
+
+try:
+    from cryoet_data_portal import Client, Dataset
+except ImportError:
+    Client, Dataset = None, None
 
 
-ROOT = "/scratch/projects/nim00007/sam/data/"
-
-EXPERIMENT_ROOT = "/scratch/projects/nim00007/sam/experiments/new_models"
-
-VANILLA_MODELS = {
-    "vit_t": "/scratch-grete/projects/nim00007/sam/models/new_models/vanilla/vit_t_mobile_sam.pth",
-    "vit_b": "/scratch-grete/projects/nim00007/sam/models/new_models/vanilla/sam_vit_b_01ec64.pth",
-    "vit_l": "/scratch-grete/projects/nim00007/sam/models/new_models/vanilla/sam_vit_l_0b3195.pth",
-    "vit_h": "/scratch-grete/projects/nim00007/sam/models/new_models/vanilla/sam_vit_h_4b8939.pth"
+BIOIMAGEIO_IDS = {
+    "covid_if": "ilastik/covid_if_training_data",
+    "cremi": "ilastik/cremi_training_data",
+    "dsb": "ilastik/stardist_dsb_training_data",
+    "hpa": "",  # not on bioimageio yet
+    "isbi2012": "ilastik/isbi2012_neuron_segmentation_challenge",
+    "kasthuri": "",  # not on bioimageio yet:
+    "livecell": "ilastik/livecell_dataset",
+    "lucchi": "",  # not on bioimageio yet:
+    "mitoem": "ilastik/mitoem_segmentation_challenge",
+    "monuseg": "deepimagej/monuseg_digital_pathology_miccai2018",
+    "ovules": "",  # not on bioimageio yet
+    "plantseg_root": "ilastik/plantseg_root",
+    "plantseg_ovules": "ilastik/plantseg_ovules",
+    "platynereis": "ilastik/platynereis_em_training_data",
+    "snemi": "",  # not on bioimagegio yet
+    "uro_cell": "",  # not on bioimageio yet: https://doi.org/10.1016/j.compbiomed.2020.103693
+    "vnc": "ilastik/vnc",
 }
 
 
-FILE_SPECS = {
-    "lucchi": {"val": "lucchi_train_*", "test": "lucchi_test_*"},
-    "nuc_mm/mouse": {"val": "nuc_mm_val_*", "test": "nuc_mm_train_*"},
-    "nuc_mm/zebrafish": {"val": "nuc_mm_val_*", "test": "nuc_mm_train_*"},
-    "platynereis/cilia": {"val": "platy_cilia_val_*", "test": "platy_cilia_test_*"},
-    "platynereis/nuclei": {"val": "platy_nuclei_val_*", "test": "platy_nuclei_test_*"},
-    "platynereis/cells": {"val": "platy_cells_val_*", "test": "platy_cells_test_*"},
-    "cremi": {"val": "cremi_val_*", "test": "cremi_test_*"}
-}
-
-# good spot to track all datasets we use atm
-DATASETS = [
-    # in-domain (LM)
-    "tissuenet/one_chan", "tissuenet/multi_chan", "deepbacs", "plantseg/root", "livecell",
-    "neurips-cell-seg/all", "neurips-cell-seg/tuning", "neurips-cell-seg/self",
-    # out-of-domain (LM)
-    "covid_if", "plantseg/ovules", "hpa", "lizard", "mouse-embryo", "ctc/hela_samples", "dynamicnuclearnet", "pannuke",
-    # organelles (EM)
-    #   - in-domain
-    "mitoem/rat", "mitoem/human", "platynereis/nuclei",
-    #   - out-of-domain
-    "mitolab/c_elegans", "mitolab/fly_brain", "mitolab/glycolytic_muscle", "mitolab/hela_cell",
-    "mitolab/lucchi_pp", "mitolab/salivary_gland", "mitolab/tem", "lucchi", "nuc_mm/mouse",
-    "nuc_mm/zebrafish", "uro_cell", "sponge_em", "platynereis/cilia", "vnc", "asem/mito", "asem/er",
-    # boundaries - EM
-    #   - in-domain
-    "cremi", "platynereis/cells",
-    #   - out-of-domain
-    "axondeepseg", "snemi", "isbi",
-]
+def get_bioimageio_dataset_id(dataset_name):
+    assert dataset_name in BIOIMAGEIO_IDS
+    return BIOIMAGEIO_IDS[dataset_name]
 
 
-def get_dataset_paths(dataset_name, split_choice):
-    # let's check if we have a particular naming logic to save the images
-    try:
-        file_search_specs = FILE_SPECS[dataset_name][split_choice]
-        is_explicit_split = False
-    except KeyError:
-        file_search_specs = "*"
-        is_explicit_split = True
+def get_checksum(filename):
+    with open(filename, "rb") as f:
+        file_ = f.read()
+        checksum = hashlib.sha256(file_).hexdigest()
+    return checksum
 
-    # if the datasets have different modalities/species, let's make use of it
-    split_names = dataset_name.split("/")
-    if len(split_names) > 1:
-        assert len(split_names) <= 2
-        dataset_name = [split_names[0], "slices", split_names[1]]
+
+def _check_checksum(path, checksum):
+    if checksum is not None:
+        this_checksum = get_checksum(path)
+        if this_checksum != checksum:
+            raise RuntimeError(
+                "The checksum of the download does not match the expected checksum."
+                f"Expected: {checksum}, got: {this_checksum}"
+            )
+        print("Download successful and checksums agree.")
     else:
-        dataset_name = [*split_names, "slices"]
-
-    # if there is an explicit val/test split made, let's look at them
-    if is_explicit_split:
-        dataset_name.append(split_choice)
-
-    raw_dir = os.path.join(ROOT, *dataset_name, "raw", file_search_specs)
-    labels_dir = os.path.join(ROOT, *dataset_name, "labels", file_search_specs)
-
-    return raw_dir, labels_dir
+        warn("The file was downloaded, but no checksum was provided, so the file may be corrupted.")
 
 
-def get_model(model_type, ckpt):
-    if ckpt is None:
-        ckpt = VANILLA_MODELS[model_type]
-    predictor = get_sam_model(model_type=model_type, checkpoint_path=ckpt)
-    return predictor
+# this needs to be extended to support download from s3 via boto,
+# if we get a resource that is available via s3 without support for http
+def download_source(path, url, download, checksum=None, verify=True):
+    if os.path.exists(path):
+        return
+    if not download:
+        raise RuntimeError(f"Cannot find the data at {path}, but download was set to False")
+
+    with requests.get(url, stream=True, allow_redirects=True, verify=verify) as r:
+        r.raise_for_status()  # check for error
+        file_size = int(r.headers.get("Content-Length", 0))
+        desc = f"Download {url} to {path}"
+        if file_size == 0:
+            desc += " (unknown file size)"
+        with tqdm.wrapattr(r.raw, "read", total=file_size, desc=desc) as r_raw, open(path, "wb") as f:
+            copyfileobj(r_raw, f)
+
+    _check_checksum(path, checksum)
 
 
-def get_paths(dataset_name, split):
-    assert dataset_name in DATASETS, dataset_name
+def download_source_gdrive(path, url, download, checksum=None, download_type="zip", expected_samples=10000):
+    if os.path.exists(path):
+        return
 
-    if dataset_name == "livecell":
-        image_paths, gt_paths = _get_livecell_paths(input_folder=os.path.join(ROOT, "livecell"), split=split)
-        return sorted(image_paths), sorted(gt_paths)
+    if not download:
+        raise RuntimeError(f"Cannot find the data at {path}, but download was set to False")
 
-    image_dir, gt_dir = get_dataset_paths(dataset_name, split)
-    image_paths = sorted(glob(os.path.join(image_dir)))
-    gt_paths = sorted(glob(os.path.join(gt_dir)))
-    return image_paths, gt_paths
+    if gdown is None:
+        raise RuntimeError(
+            "Need gdown library to download data from google drive. "
+            "Please install gdown: 'mamba install gdown==4.6.3'."
+        )
+
+    print("Downloading the files. Might take a few minutes...")
+
+    if download_type == "zip":
+        gdown.download(url, path, quiet=False)
+        _check_checksum(path, checksum)
+    elif download_type == "folder":
+        assert version.parse(gdown.__version__) == version.parse("4.6.3"), "Please install 'gdown==4.6.3'."
+        gdown.download_folder.__globals__["MAX_NUMBER_FILES"] = expected_samples
+        gdown.download_folder(url=url, output=path, quiet=True, remaining_ok=True)
+    else:
+        raise ValueError("`download_path` argument expects either `zip`/`folder`")
+    print("Download completed.")
 
 
-def get_pred_paths(prediction_folder):
-    pred_paths = sorted(glob(os.path.join(prediction_folder, "*")))
-    return pred_paths
+def download_source_empiar(path, access_id, download):
+    download_path = os.path.join(path, access_id)
+
+    if os.path.exists(download_path):
+        return download_path
+    if not download:
+        raise RuntimeError(f"Cannot find the data at {path}, but download was set to False")
+
+    if which("ascp") is None:
+        raise RuntimeError(
+            "Need aspera-cli to download data from empiar."
+            "You can install it via 'mamba install -c hcc aspera-cli'."
+        )
+
+    key_file = os.path.expanduser("~/.aspera/cli/etc/asperaweb_id_dsa.openssh")
+    if not os.path.exists(key_file):
+        conda_root = os.environ["CONDA_PREFIX"]
+        key_file = os.path.join(conda_root, "etc/asperaweb_id_dsa.openssh")
+
+    if not os.path.exists(key_file):
+        raise RuntimeError("Could not find the aspera ssh keyfile")
+
+    cmd = [
+        "ascp", "-QT", "-l", "200M", "-P33001",
+        "-i", key_file, f"emp_ext2@fasp.ebi.ac.uk:/{access_id}", path
+    ]
+    run(cmd)
+
+    return download_path
 
 
-def download_all_datasets(path):
-    # lucchi
-    datasets.get_lucchi_dataset(os.path.join(path, "lucchi"), split="train", patch_shape=(1, 512, 512), download=True)
-    datasets.get_lucchi_dataset(os.path.join(path, "lucchi"), split="test", patch_shape=(1, 512, 512), download=True)
+def download_source_kaggle(path, dataset_name, download, competition=False):
+    if not download:
+        raise RuntimeError(f"Cannot fine the data at {path}, but download was set to False.")
 
-    # snemi
-    datasets.get_snemi_dataset(os.path.join(path, "snemi"), patch_shape=(1, 512, 512), sample="train", download=True)
     try:
-        datasets.get_snemi_dataset(os.path.join(path, "snemi"), patch_shape=(1, 512, 512), sample="test", download=True)
-    except KeyError:
-        warnings.warn("SNEMI's test set does not have labels. We download it in one place anyways.")
+        from kaggle.api.kaggle_api_extended import KaggleApi
+    except ModuleNotFoundError:
+        msg = "Please install the Kaggle API. You can do this using 'pip install kaggle'. "
+        msg += "After you have installed kaggle, you would need an API token. "
+        msg += "Follow the instructions at https://www.kaggle.com/docs/api."
+        raise ModuleNotFoundError(msg)
 
-    # nuc_mm
-    datasets.get_nuc_mm_dataset(
-        os.path.join(path, "nuc_mm"), sample="mouse", split="train", patch_shape=(1, 192, 192), download=True
-    )
-    datasets.get_nuc_mm_dataset(
-        os.path.join(path, "nuc_mm"), sample="zebrafish", split="train", patch_shape=(1, 64, 64), download=True
-    )
+    api = KaggleApi()
+    api.authenticate()
 
-    # platy-cilia
-    datasets.get_platynereis_cilia_dataset(os.path.join(path, "platynereis"), patch_shape=(1, 512, 512), download=True)
-    datasets.get_platynereis_nuclei_dataset(os.path.join(path, "platynereis"), patch_shape=(1, 512, 512), download=True)
-    datasets.get_platynereis_cell_dataset(os.path.join(path, "platynereis"), patch_shape=(1, 512, 512), download=True)
+    if competition:
+        api.competition_download_files(competition=dataset_name, path=path, quiet=False)
+    else:
+        api.dataset_download_files(dataset=dataset_name, path=path, quiet=False)
 
-    # mitoem
-    datasets.get_mitoem_dataset(
-        os.path.join(path, "mitoem"), splits="val", patch_shape=(1, 512, 512), download=True
-    )
 
-    # mitolab
-    print("MitoLab benchmark datasets need to downloaded separately. See `datasets.cem.get_benchmark_datasets`")
+def download_source_tcia(path, url, dst, csv_filename, download):
+    if not download:
+        raise RuntimeError(f"Cannot fine the data at {path}, but download was set to False.")
 
-    # uro-cell
-    datasets.get_uro_cell_dataset(
-        os.path.join(path, "uro_cell"), target="mito", patch_shape=(1, 512, 512), download=True
-    )
+    assert url.endswith(".tcia"), f"{path} is not a TCIA Manifest."
 
-    # sponge-em
-    datasets.get_sponge_em_dataset(
-        os.path.join(path, "sponge_em"), mode="instances", patch_shape=(1, 512, 512), download=True
+    # downloads the manifest file from the collection page
+    manifest = requests.get(url=url)
+    with open(path, "wb") as f:
+        f.write(manifest.content)
+
+    # this part extracts the UIDs from the manigests and downloads them.
+    nbia.downloadSeries(
+        series_data=path, input_type="manifest", path=dst, csv_filename=csv_filename,
     )
 
-    # isbi
-    datasets.get_isbi_dataset(os.path.join(path, "isbi"), patch_shape=(1, 512, 512), download=True)
 
-    # axondeepseg
-    datasets.get_axondeepseg_dataset(
-        os.path.join(path, "axondeepseg"), name="tem", patch_shape=(1, 512, 512), download=True
-    )
-
-    # cremi
-    datasets.get_cremi_dataset(os.path.join(path, "cremi"), patch_shape=(1, 512, 512), download=True)
-
-    # covid-if
-    datasets.get_covid_if_dataset(os.path.join(path, "covid_if"), patch_shape=(1, 512, 512), download=True)
-
-    # tissuenet: data cannot be downloaded automatically. please download from here - https://datasets.deepcell.org/data
-
-    # deepbacs
-    datasets.get_deepbacs_dataset(os.path.join(path, "deepbacs"), split="train", patch_shape=(256, 256), download=True)
-    datasets.get_deepbacs_dataset(os.path.join(path, "deepbacs"), split="val", patch_shape=(256, 256), download=True)
-    datasets.get_deepbacs_dataset(os.path.join(path, "deepbacs"), split="test", patch_shape=(256, 256), download=True)
-
-    # plantseg root
-    datasets.get_plantseg_dataset(
-        os.path.join(path, "plantseg"), name="root", split="train", patch_shape=(1, 512, 512), download=True
-    )
-    datasets.get_plantseg_dataset(
-        os.path.join(path, "plantseg"), name="root", split="val", patch_shape=(1, 512, 512), download=True
-    )
-    datasets.get_plantseg_dataset(
-        os.path.join(path, "plantseg"), name="root", split="test", patch_shape=(1, 512, 512), download=True
-    )
-
-    # hpa
-    datasets.get_hpa_segmentation_dataset(
-        os.path.join(path, "hpa"), split="train", patch_shape=(512, 512), download=True
-    )
-    datasets.get_hpa_segmentation_dataset(
-        os.path.join(path, "hpa"), split="val", patch_shape=(512, 512), download=True
-    )
-
-    # lizard: see `torch_em.data.datasets.get_lizard_dataset` for details to download the dataset
-
-    # mouse embryo
-    datasets.get_mouse_embryo_dataset(
-        os.path.join(path, "mouse-embryo"), name="nuclei", split="train", patch_shape=(1, 512, 512), download=True
-    )
-    datasets.get_mouse_embryo_dataset(
-        os.path.join(path, "mouse-embryo"), name="nuclei", split="val", patch_shape=(1, 512, 512), download=True
-    )
-
-    # plantseg ovules
-    datasets.get_plantseg_dataset(
-        os.path.join(path, "plantseg"), name="ovules", split="train", patch_shape=(1, 512, 512), download=True
-    )
-    datasets.get_plantseg_dataset(
-        os.path.join(path, "plantseg"), name="ovules", split="val", patch_shape=(1, 512, 512), download=True
-    )
-    datasets.get_plantseg_dataset(
-        os.path.join(path, "plantseg"), name="ovules", split="test", patch_shape=(1, 512, 512), download=True
-    )
-
-#
-# PARSER FOR ALL THE REQUIRED ARGUMENTS
-#
+def update_kwargs(kwargs, key, value, msg=None):
+    if key in kwargs:
+        msg = f"{key} will be over-ridden in loader kwargs." if msg is None else msg
+        warn(msg)
+    kwargs[key] = value
+    return kwargs
 
 
-def get_default_arguments():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-m", "--model", type=str, required=True, help="Provide the model type to initialize the predictor"
-    )
-    parser.add_argument("-c", "--checkpoint", type=none_or_str, required=True, default=None) #expects best.pt
-    parser.add_argument("-e", "--experiment_folder", type=str, required=True) #empty directory for saving the output
-    parser.add_argument("--organ", type=str, required=False, default=None) #optionally defines organ class to access. If empty, whole dataset is used
-    parser.add_argument("--box", action="store_true", help="If passed, starts with first prompt as box") #otherwise, point
-    parser.add_argument(
-        "--use_masks", action="store_true", help="To use logits masks for iterative prompting." 
-    )
-    args = parser.parse_args()
-    return args
+def unzip_tarfile(tar_path, dst, remove=True):
+    import tarfile
+
+    if tar_path.endswith(".tar.gz"):
+        access_mode = "r:gz"
+    elif tar_path.endswith(".tar"):
+        access_mode = "r:"
+    else:
+        raise ValueError(
+            "The provided file isn't a supported archive to unpack. ",
+            f"Please check the file: {tar_path}"
+        )
+
+    tar = tarfile.open(tar_path, access_mode)
+    tar.extractall(dst)
+    tar.close()
+
+    if remove:
+        os.remove(tar_path)
 
 
-def none_or_str(value):
-    if value == 'None':
-        return None
-    return value
+def unzip_rarfile(rar_path, dst, remove=True, use_rarfile=True):
+    import rarfile
+    import aspose.zip as az
+
+    if use_rarfile:
+        with rarfile.RarFile(rar_path) as f:
+            f.extractall(path=dst)
+    else:
+        with az.rar.RarArchive(rar_path) as archive:
+            archive.extract_to_directory(dst)
+
+    if remove:
+        os.remove(rar_path)
+
+
+def unzip(zip_path, dst, remove=True):
+    with zipfile.ZipFile(zip_path, "r") as f:
+        f.extractall(dst)
+    if remove:
+        os.remove(zip_path)
+
+
+def split_kwargs(function, **kwargs):
+    function_parameters = inspect.signature(function).parameters
+    parameter_names = list(function_parameters.keys())
+    other_kwargs = {k: v for k, v in kwargs.items() if k not in parameter_names}
+    kwargs = {k: v for k, v in kwargs.items() if k in parameter_names}
+    return kwargs, other_kwargs
+
+
+# this adds the default transforms for 'raw_transform' and 'transform'
+# in case these were not specified in the kwargs
+# this is NOT necessary if 'default_segmentation_dataset' is used, only if a dataset class
+# is used directly, e.g. in the LiveCell Loader
+def ensure_transforms(ndim, **kwargs):
+    if "raw_transform" not in kwargs:
+        kwargs = update_kwargs(kwargs, "raw_transform", torch_em.transform.get_raw_transform())
+    if "transform" not in kwargs:
+        kwargs = update_kwargs(kwargs, "transform", torch_em.transform.get_augmentations(ndim=ndim))
+    return kwargs
+
+
+def add_instance_label_transform(
+    kwargs, add_binary_target, label_dtype=None, binary=False, boundaries=False, offsets=None, binary_is_exclusive=True,
+):
+    if binary_is_exclusive:
+        assert sum((offsets is not None, boundaries, binary)) <= 1
+    else:
+        assert sum((offsets is not None, boundaries)) <= 1
+    if offsets is not None:
+        label_transform2 = torch_em.transform.label.AffinityTransform(offsets=offsets,
+                                                                      add_binary_target=add_binary_target,
+                                                                      add_mask=True)
+        msg = "Offsets are passed, but 'label_transform2' is in the kwargs. It will be over-ridden."
+        kwargs = update_kwargs(kwargs, "label_transform2", label_transform2, msg=msg)
+        label_dtype = torch.float32
+    elif boundaries:
+        label_transform = torch_em.transform.label.BoundaryTransform(add_binary_target=add_binary_target)
+        msg = "Boundaries is set to true, but 'label_transform' is in the kwargs. It will be over-ridden."
+        kwargs = update_kwargs(kwargs, "label_transform", label_transform, msg=msg)
+        label_dtype = torch.float32
+    elif binary:
+        label_transform = torch_em.transform.label.labels_to_binary
+        msg = "Binary is set to true, but 'label_transform' is in the kwargs. It will be over-ridden."
+        kwargs = update_kwargs(kwargs, "label_transform", label_transform, msg=msg)
+        label_dtype = torch.float32
+    return kwargs, label_dtype
+
+
+def update_kwargs_for_resize_trafo(kwargs, patch_shape, resize_inputs, resize_kwargs=None, ensure_rgb=None):
+    """
+    Checks for raw_transform and label_transform incoming values.
+    If yes, it will automatically merge these two transforms to apply them together.
+    """
+    if resize_inputs:
+        assert isinstance(resize_kwargs, dict)
+
+        target_shape = resize_kwargs.get("patch_shape")
+        if len(resize_kwargs["patch_shape"]) == 3:
+            # we only need the XY dimensions to reshape the inputs along them.
+            target_shape = target_shape[1:]
+            # we provide the Z dimension value to return the desired number of slices and not the whole volume
+            kwargs["z_ext"] = resize_kwargs["patch_shape"][0]
+
+        raw_trafo = ResizeLongestSideInputs(target_shape=target_shape, is_rgb=resize_kwargs["is_rgb"])
+        label_trafo = ResizeLongestSideInputs(target_shape=target_shape, is_label=True)
+
+        # The patch shape provided to the dataset. Here, "None" means that the entire volume will be loaded.
+        patch_shape = None
+
+    if ensure_rgb is None:
+        raw_trafos = []
+    else:
+        assert not isinstance(ensure_rgb, bool), "'ensure_rgb' is expected to be a function."
+        raw_trafos = [ensure_rgb]
+
+    if "raw_transform" in kwargs:
+        raw_trafos.extend([raw_trafo, kwargs["raw_transform"]])
+    else:
+        raw_trafos.extend([raw_trafo, get_raw_transform()])
+
+    kwargs["raw_transform"] = Compose(*raw_trafos, is_multi_tensor=False)
+
+    if "label_transform" in kwargs:
+        trafo = Compose(label_trafo, kwargs["label_transform"], is_multi_tensor=False)
+        kwargs["label_transform"] = trafo
+    else:
+        kwargs["label_transform"] = label_trafo
+
+    return kwargs, patch_shape
+
+
+def generate_labeled_array_from_xml(shape, xml_file):
+    """Function taken from: https://github.com/rshwndsz/hover-net/blob/master/lightning_hovernet.ipynb
+
+    Given image shape and path to annotations (xml file), generatebit mask with the region inside a contour being white
+        shape: The image shape on which bit mask will be made
+        xml_file: path relative to the current working directory where the xml file is present
+
+    Returns:
+        An image of given shape with region inside contour being white..
+    """
+    # DOM object created by the minidom parser
+    xDoc = minidom.parse(xml_file)
+
+    # List of all Region tags
+    regions = xDoc.getElementsByTagName('Region')
+
+    # List which will store the vertices for each region
+    xy = []
+    for region in regions:
+        # Loading all the vertices in the region
+        vertices = region.getElementsByTagName('Vertex')
+
+        # The vertices of a region will be stored in a array
+        vw = np.zeros((len(vertices), 2))
+
+        for index, vertex in enumerate(vertices):
+            # Storing the values of x and y coordinate after conversion
+            vw[index][0] = float(vertex.getAttribute('X'))
+            vw[index][1] = float(vertex.getAttribute('Y'))
+
+        # Append the vertices of a region
+        xy.append(np.int32(vw))
+
+    # Creating a completely black image
+    mask = np.zeros(shape, np.float32)
+
+    for i, contour in enumerate(xy):
+        r, c = polygon(np.array(contour)[:, 1], np.array(contour)[:, 0], shape=shape)
+        mask[r, c] = i
+    return mask
+
+
+def convert_svs_to_array(path, location=(0, 0), level=0, img_size=None):
+    """Converts .svs files to numpy array format
+
+    Argument:
+        - path: [str] - Path to the svs file
+        (below mentioned arguments are used for multi-resolution images)
+        - location: tuple[int, int] - pixel location (x, y) in level 0 of the image (default: (0, 0))
+        - level: [int] -  target level used to read the image (default: 0)
+        - img_size: tuple[int, int] - expected size of the image
+                                      (default: None -> obtains the original shape at the expected level)
+
+    Returns:
+        the image as numpy array
+
+    TODO: it can be extended to convert WSIs (or modalities with multiple resolutions)
+    """
+    assert path.endswith(".svs"), f"The provided file ({path}) isn't in svs format"
+
+    from tiffslide import TiffSlide
+
+    _slide = TiffSlide(path)
+
+    if img_size is None:
+        img_size = _slide.level_dimensions[0]
+
+    img_arr = _slide.read_region(location=location, level=level, size=img_size, as_array=True)
+
+    return img_arr
+
+
+def download_from_cryo_et_portal(path, dataset_id, download):
+    if Client is None or Dataset is None:
+        raise RuntimeError("Please install CryoETDataPortal via 'pip install cryoet-data-portal'")
+
+    output_path = os.path.join(path, str(dataset_id))
+    if os.path.exists(output_path):
+        return output_path
+
+    if not download:
+        raise RuntimeError(f"Cannot find the data at {path}, but download was set to False")
+
+    client = Client()
+    dataset = Dataset.get_by_id(client, dataset_id)
+    dataset.download_everything(dest_path=path)
+
+    return output_path

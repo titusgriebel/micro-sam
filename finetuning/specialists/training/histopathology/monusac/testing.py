@@ -23,13 +23,21 @@ import os
 # organ_list = ['kidney', 'prostate', 'lung', 'breast']
 # make_experiment_folders('/scratch/users/u11644/models/evaluation/monusac_eval/',organ_list)
 
-from torch_em.data.datasets.histopathology.monusac import get_monusac_dataset
+from monusac import get_monusac_paths
 import numpy as np
 import os
 import imageio
 
 def test():
     for split in ['train', 'test']:
-        sd = get_monusac_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/monusac/download/complete_dataset', (512,512), split, debug=True)
+        image_paths, label_paths = get_monusac_paths('/mnt/lustre-grete/usr/u12649/scratch/data/monusac/download/complete_dataset', (512, 512), split, debug=True)
+        for image in image_paths:
+            image = imageio.imread(image)
+            # image = image.astype(np.float32)
+            print(f'Image datatype: {image.dtype}')
+            unique_values = np.unique(image)
+            print("Max value:", max(unique_values))
+            print("Min value:", min(unique_values))
+
 
 test()
