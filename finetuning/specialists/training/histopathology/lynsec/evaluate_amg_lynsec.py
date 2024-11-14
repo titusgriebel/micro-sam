@@ -15,7 +15,6 @@ def get_val_paths():
     print(len(val_image_paths), len(val_label_paths))
 
     return val_image_paths, val_label_paths
-    
 
 def get_test_paths():
     path = '/mnt/lustre-grete/usr/u12649/scratch/data/lynsec/loaded_dataset/complete_dataset/test2'

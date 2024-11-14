@@ -115,13 +115,16 @@ def get_monuseg_dataset(
         #raise ValueError("The test split does not have any organ informations, please pass `organ_type=None`")
     assert len(image_paths) == len(label_paths) != 0
     if debug:
-        for image in image_paths:
+        max_value = []
+        for image in tqdm(image_paths):
             image = imageio.imread(image)
             # image = image.astype(np.float32)
             print(f'Image datatype: {image.dtype}')
             unique_values = np.unique(image)
             print("Max value:", max(unique_values))
             print("Min value:", min(unique_values))
+            max_value.append(max(unique_values))
+        print(f'Overall max value: {max(max_value)}')
     kwargs, _ = util.add_instance_label_transform(
         kwargs, add_binary_target=True, binary=binary, boundaries=boundaries, offsets=offsets
     )

@@ -1,4 +1,5 @@
 import os
+import micro_sam.training as sam_training
 
 # def len_identical():
 #     identical = len(os.listdir('/scratch/users/u11644/models/evaluation/monusac_eval/instance_eval/instance_segmentation_with_decoder/inference')) == len(os.listdir('/scratch/users/u11644/data/monusac/monusac_test/complete_labels'))
@@ -27,17 +28,20 @@ from monusac import get_monusac_paths
 import numpy as np
 import os
 import imageio
-
+from tqdm import tqdm
 def test():
-    for split in ['train', 'test']:
-        image_paths, label_paths = get_monusac_paths('/mnt/lustre-grete/usr/u12649/scratch/data/monusac/download/complete_dataset', (512, 512), split, debug=True)
-        for image in image_paths:
+    for split in tqdm(['train', 'test']):
+        image_paths, label_paths = get_monusac_paths('/mnt/lustre-grete/usr/u12649/scratch/data/monusac/download/complete_dataset', split)
+        max_value = []
+        for image in tqdm(image_paths):
             image = imageio.imread(image)
             # image = image.astype(np.float32)
             print(f'Image datatype: {image.dtype}')
             unique_values = np.unique(image)
-            print("Max value:", max(unique_values))
-            print("Min value:", min(unique_values))
-
+            # print("Max value:", max(unique_values))
+            # print("Min value:", min(unique_values))
+            max_value.append(max(unique_values))
+    print(f'{max(max_value)} was the maximum value of the given images')
+    
 
 test()

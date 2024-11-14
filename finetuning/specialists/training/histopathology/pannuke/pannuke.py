@@ -42,14 +42,14 @@ def get_pannuke_data(path, download, folds):
     """
     os.makedirs(path, exist_ok=True)
     for tmp_fold in folds:
-        if os.path.exists(os.path.join(path, f"pannuke_{tmp_fold}.h5")):
-            return
+        # if os.path.exists(os.path.join(path, f"pannuke_{tmp_fold}.h5")):
+        #     return
 
         util.download_source(os.path.join(path, f"{tmp_fold}.zip"), URLS[tmp_fold], download, CHECKSUM[tmp_fold])
 
         print(f"Unzipping the PanNuke dataset in {tmp_fold} directories...")
         util.unzip(os.path.join(path, f"{tmp_fold}.zip"), os.path.join(path, f"{tmp_fold}"), True)
-
+        breakpoint()
         _convert_to_hdf5(path, tmp_fold)
 
 

@@ -4,7 +4,7 @@ from micro_sam.evaluation.evaluation import run_evaluation
 from micro_sam.evaluation.inference import run_instance_segmentation_with_decoder
 
 
-from util_2 import get_pred_paths, get_default_arguments
+from util_2 import get_pred_paths, get_default_arguments, VANILLA_MODELS
 from evaluate_amg_lynsec import get_test_paths, get_val_paths
 
 def run_instance_segmentation_with_decoder_inference(model_type, checkpoint, experiment_folder): #removed dataset_name as argument
@@ -34,8 +34,12 @@ def eval_instance_segmentation_with_decoder(prediction_folder, experiment_folder
 def main():
     args = get_default_arguments()
 
+    if args.checkpoint is None:
+        ckpt = VANILLA_MODELS[args.model]
+    else:
+        ckpt = args.checkpoint
     prediction_folder = run_instance_segmentation_with_decoder_inference(
-        args.model, args.checkpoint, args.experiment_folder
+        args.model, ckpt, args.experiment_folder
     )
     eval_instance_segmentation_with_decoder(prediction_folder, args.experiment_folder)
 

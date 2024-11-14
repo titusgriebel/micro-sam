@@ -1,5 +1,7 @@
 import pandas as pd
 import os
+eval_path = '/mnt/lustre-grete/usr/u12649/scratch/models/vanilla_sam_eval'
+
 
 def read_instance_csv(path):
     result_dict = {
@@ -29,7 +31,8 @@ def read_instance_csv(path):
     df.to_csv('/mnt/lustre-grete/usr/u12649/scratch/all_results.csv', index=False)
 
 
-read_instance_csv('/mnt/lustre-grete/usr/u12649/scratch/models/evaluation/')
+read_instance_csv(eval_path)
+
 
 def read_amg_csv(path):
     result_dict = {
@@ -59,7 +62,7 @@ def read_amg_csv(path):
     df.to_csv('/mnt/lustre-grete/usr/u12649/scratch/all_amg_results.csv', index=False)
 
 
-read_amg_csv('/mnt/lustre-grete/usr/u12649/scratch/models/evaluation/')
+read_amg_csv(eval_path)
 
 
 def read_it_boxes_csv(path):
@@ -100,7 +103,7 @@ def read_it_boxes_csv(path):
     df.to_csv('/mnt/lustre-grete/usr/u12649/scratch/all_amg_results.csv', index=False)
 
 
-read_it_boxes_csv('/mnt/lustre-grete/usr/u12649/scratch/models/evaluation/')
+read_it_boxes_csv(eval_path)
 
 
 def read_it_points_csv(path):
@@ -141,4 +144,4 @@ def read_it_points_csv(path):
     df.to_csv('/mnt/lustre-grete/usr/u12649/scratch/all_amg_results.csv', index=False)
 
 
-read_it_points_csv('/mnt/lustre-grete/usr/u12649/scratch/models/evaluation/')
+read_it_points_csv(eval_path)
