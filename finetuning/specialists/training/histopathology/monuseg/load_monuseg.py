@@ -123,13 +123,13 @@ def load_and_save_monuseg(directory, organ_type=None):
         
        
 ['kidney', 'stomach', 'breast', 'bladder', 'liver', 'prostate', 'colon']
-load_and_save_monuseg('/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/loaded_data', organ_type=None)
+#load_and_save_monuseg('/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/loaded_data', organ_type=None)
 #takes a list of the items 'kidney', 'stomach', 'breast', 'bladder', 'liver', 'prostate', 'colon' and creates an image and label folder for the respective images
 
 # for image, label in train_loader:
 #     print(image,label)
 
-
+ 
 # def delete_alpha_channel(path):
 #    for filename in os.listdir(path):
 #       image_path = os.path.join(path, filename)
@@ -143,5 +143,17 @@ load_and_save_monuseg('/mnt/lustre-grete/usr/u12649/scratch/data/monuseg/loaded_
 
 
 #delete_alpha_channel('/scratch/users/u11644/data/monusac/monusac_test/complete_images')
+from monuseg import get
+from tqdm import tqdm
+def examine_monuseg():
+    data_paths = get_monuseg_paths('/mnt/lustre-grete/usr/u12649/scratch/data/pannuke_test',['fold_1'],True)
+    h5_path = data_paths[0]
+    with h5py.File(h5_path, 'r') as f:
+        images = f['images']
+        np_images = np.array(images)
+        tp_images = np_images.transpose(1,0,2,3)
+        print(tp_images.shape)
+        for image in tqdm(tp_images):
+            print(f'Image datatype: {image.dtype}, max value: {np.max(image)}, min value: {np.min(image)}')
 
-
+examine_monuseg()

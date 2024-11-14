@@ -14,10 +14,10 @@ ROOT = "/scratch/projects/nim00007/sam/data/"
 EXPERIMENT_ROOT = "/scratch/projects/nim00007/sam/experiments/new_models"
 
 VANILLA_MODELS = {
-    "vit_t": "/scratch-grete/projects/nim00007/sam/models/new_models/vanilla/vit_t_mobile_sam.pth",
-    "vit_b": "/scratch-grete/projects/nim00007/sam/models/new_models/vanilla/sam_vit_b_01ec64.pth",
-    "vit_l": "/scratch-grete/projects/nim00007/sam/models/new_models/vanilla/sam_vit_l_0b3195.pth",
-    "vit_h": "/scratch-grete/projects/nim00007/sam/models/new_models/vanilla/sam_vit_h_4b8939.pth"
+    "vit_t": "/scratch-grete/projects/nim00007/sam/models/vanilla/vit_t_mobile_sam.pth",
+    "vit_b": "/scratch-grete/projects/nim00007/sam/models/vanilla/sam_vit_b_01ec64.pth",
+    "vit_l": "/scratch-grete/projects/nim00007/sam/models/vanilla/sam_vit_l_0b3195.pth",
+    "vit_h": "/scratch-grete/projects/nim00007/sam/models/vanilla/sam_vit_h_4b8939.pth"
 }
 
 
@@ -219,7 +219,7 @@ def get_default_arguments():
     parser.add_argument(
         "-m", "--model", type=str, required=True, help="Provide the model type to initialize the predictor"
     )
-    parser.add_argument("-c", "--checkpoint", type=none_or_str, required=True, default=None) #expects best.pt
+    parser.add_argument("-c", "--checkpoint", type=none_or_str, default=None) #expects best.pt
     parser.add_argument("-e", "--experiment_folder", type=str, required=True) #empty directory for saving the output
     parser.add_argument("--organ", type=str, required=False, default=None) #optionally defines organ class to access. If empty, whole dataset is used
     parser.add_argument("--box", action="store_true", help="If passed, starts with first prompt as box") #otherwise, point

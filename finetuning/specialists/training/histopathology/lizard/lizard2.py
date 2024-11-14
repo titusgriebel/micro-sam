@@ -30,28 +30,24 @@ CHECKSUM2 = "9f529f30d9de66587167991a8bf75aaad07ce1d518b72e825c868ac7c33015ed"
 LABEL_CHECKSUM = "79f22ca83ca535682fba340cbc8bb66b74abd1ead4151ffc8593f204fcb97dec"
 
 
-def _extract_images(image_folder, label_folder, output_dir, split):
+def _extract_images(image_folder, label_folder, output_dir, split, debug=False):
     image_files = glob(os.path.join(image_folder, "*.png"))
     split_dict = create_split_dicts('/mnt/lustre-grete/usr/u12649/scratch/data/lizard/lizard_labels/Lizard_Labels/info.csv')
     output_path = os.path.join(output_dir, split)
     os.makedirs(output_path, exist_ok=True)
+    max_values = []
     for image_file in tqdm(image_files, desc=f"Extract images from {image_folder}"):
         fname = os.path.basename(image_file)
         label_file = os.path.join(label_folder, fname.replace(".png", ".mat"))
         assert os.path.exists(label_file), label_file
-
         image = imageio.imread(image_file)
-        # image = image.astype(np.float32)
-        print(f'Image datatype: {image.dtype}')
-        unique_values = np.unique(image)
-        print("Max value:", max(unique_values))
-        print("Min value:", min(unique_values))
-        
-         
-        breakpoint()
-        assert image.ndim == 3 and image.shape[-1] == 3
-        assert image.dtype == np.float32, 'float32 conversion unsuccessful'
-
+        if debug:
+            print(f'Image datatype: {image.dtype}')
+            unique_values = np.unique(image)
+            # print("Max value:", max(unique_values))
+            # print("Min value:", min(unique_values))
+            max_values.append(max(unique_values))
+            assert image.ndim == 3 and image.shape[-1] == 3
         labels = loadmat(label_file) 
         segmentation = labels["inst_map"]
         # segmentation = segmentation.astype(np.float32)
@@ -70,6 +66,8 @@ def _extract_images(image_folder, label_folder, output_dir, split):
                 f.create_dataset("image", data=image, compression="gzip")
                 f.create_dataset("labels/segmentation", data=segmentation, compression="gzip")
                 f.create_dataset("labels/classes", data=classes, compression="gzip")  
+    if debug:
+        print(f"The dataset's maximum value is {max(max_values)}")
 
 def get_tiffs(path, split):
     output_dir = os.path.join(path, split)
@@ -87,7 +85,7 @@ def get_tiffs(path, split):
             tifffile.imwrite(label_output_path, label_data)
     
 
-def _require_lizard_data(path, download, split):
+def _require_lizard_data(path, download, split, debug=False):
     image_files = glob(os.path.join(path, split, "*.h5"))
     # if len(image_files) > 0:
     #     return
@@ -114,8 +112,8 @@ def _require_lizard_data(path, download, split):
     assert os.path.exists(image_folder2), image_folder2
     assert os.path.exists(label_folder), label_folder
 
-    _extract_images(image_folder1, os.path.join(label_folder, "Labels"), path, split) #returns .h5 for each image containing datasets for image, segmentation label and classification label
-    _extract_images(image_folder2, os.path.join(label_folder, "Labels"), path, split)
+    _extract_images(image_folder1, os.path.join(label_folder, "Labels"), path, split, debug) #returns .h5 for each image containing datasets for image, segmentation label and classification label
+    _extract_images(image_folder2, os.path.join(label_folder, "Labels"), path, split, debug)
     
     # rmtree(image_folder1)
     # rmtree(image_folder2)
@@ -239,4 +237,4 @@ def load_lizard_dataset(path):
             counter+=1
 
 #load_cryonuseg_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/lizard')
-_require_lizard_data(path='/mnt/lustre-grete/usr/u12649/scratch/data/lizard/', download=False, split='split1')
+_require_lizard_data(path='/mnt/lustre-grete/usr/u12649/scratch/data/lizard/', download=False, split='split1', debug=True)
