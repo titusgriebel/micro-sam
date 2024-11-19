@@ -69,7 +69,7 @@ def delete_alpha_channel(path):
    for filename in os.listdir(path):
       image_path = os.path.join(path, filename)
       #with tifffile.TiffFile(image_path) as tif:
-      data = skimage.io.imread(image_path)
+      data = io.imread(image_path)
       #print(data.shape)
          #data = np.array(Image.open(image_path))
       if data.shape[-1] == 4:

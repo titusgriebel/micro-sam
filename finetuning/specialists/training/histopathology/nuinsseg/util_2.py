@@ -221,7 +221,7 @@ def get_default_arguments():
     )
     parser.add_argument("-c", "--checkpoint", type=none_or_str, required=True, default=None) #expects best.pt
     parser.add_argument("-e", "--experiment_folder", type=str, required=True) #empty directory for saving the output
-    parser.add_argument("d", "--dataset", type=str, required=True, default=None) #defines dataset, mandatory
+    parser.add_argument("-d", "--dataset", type=str, required=True, default=None) #defines dataset, mandatory
     parser.add_argument("--organ", type=str, required=False, default=None) #optionally defines organ class to access. If empty, whole dataset is used
     parser.add_argument("--box", action="store_true", help="If passed, starts with first prompt as box") #otherwise, point
     parser.add_argument(

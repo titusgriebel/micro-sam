@@ -132,9 +132,13 @@ def get_cryonuseg_loader(
     ds_kwargs, loader_kwargs = util.split_kwargs(torch_em.default_segmentation_dataset, **kwargs)
     dataset = get_cryonuseg_dataset(path, patch_shape, rater, download, **ds_kwargs)
     return torch_em.get_data_loader(dataset=dataset, batch_size=batch_size, **loader_kwargs)
-def checkbit():
+
+
+
+def main():
     for rater in ['b1', 'b2', 'b3']:
         get_cryonuseg_dataset(path='/mnt/lustre-grete/usr/u12649/scratch/data/cryonuseg', patch_shape=(512,512), rater=rater)
 
 
-checkbit()
+if __name__ == "__main__":
+    main()

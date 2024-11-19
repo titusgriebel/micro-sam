@@ -1,7 +1,7 @@
 import os
 
 def create_eval_directories(path):
-    datasets = ['cryonuseg', 'lynsec', 'lizard', 'pannuke', 'monusac', 'monuseg', 'tnbc']
+    datasets = ['cryonuseg', 'lynsec', 'lizard', 'pannuke', 'monusac', 'monuseg', 'tnbc', 'puma', 'jano', 'nuinsseg', 'cpm15', 'cpm17']
     for dataset in datasets:
         dataset_path = os.path.join(path, f'{dataset}_eval')
         for mode in ['instance', 'boxes', 'points', 'amg']:
