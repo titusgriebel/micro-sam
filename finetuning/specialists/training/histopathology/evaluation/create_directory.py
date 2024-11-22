@@ -14,7 +14,7 @@ def open_hdf5_file(file_path):
 
 # Replace 'path/to/your/file.h5' with the correct path
 file_path = '/scratch/users/u11644/data/pannuke/pannuke_fold_2.h5'
-# open_hdf5_file(file_path)
+open_hdf5_file(file_path)
 
 
 def create_directory_from_h5(hdf5_file, image_output_dir, label_output_dir):

@@ -10,6 +10,12 @@ from evaluate_amg import get_test_paths, get_val_paths
 def run_instance_segmentation_with_decoder_inference(model_type, checkpoint, experiment_folder): #removed dataset_name as argument
     val_image_paths, val_gt_paths = get_val_paths()
     test_image_paths, _ = get_test_paths()
+from util import get_pred_paths, get_default_arguments, VANILLA_MODELS
+
+
+def run_instance_segmentation_with_decoder_inference(model_type, checkpoint, experiment_folder, organ_type=None): #removed dataset_name as argument
+    val_image_paths, val_gt_paths = get_val_paths(organ_type)
+    test_image_paths, _ = get_test_paths(organ_type)
     prediction_folder = run_instance_segmentation_with_decoder(
         checkpoint,
         model_type,
