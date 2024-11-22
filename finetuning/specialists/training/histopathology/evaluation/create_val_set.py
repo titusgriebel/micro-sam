@@ -96,7 +96,7 @@ def create_val_split(directory, val_percentage, test_percentage, custom_name, or
     assert len(os.listdir(os.path.join(train_label_dst))) == len(os.listdir(os.path.join(train_image_dst))), 'label / image count mismatch in train set'
     print(f'Train set: {len(os.listdir(os.path.join(train_image_dst)))} images;  val set: {len(os.listdir(os.path.join(val_image_dst)))} images; test set: {len(os.listdir(os.path.join(test_image_dst)))}')
 
-directory = '/mnt/lustre-grete/usr/u12649/scratch/data/pannuke/' 
+directory = '/mnt/lustre-grete/usr/u12649/scratch/data/monusac/' 
 val_percentage = 0.05
 test_percentage = 0.95
 # organ_type = 

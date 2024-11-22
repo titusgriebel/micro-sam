@@ -219,7 +219,7 @@ def get_default_arguments():
     parser.add_argument(
         "-m", "--model", type=str, required=True, help="Provide the model type to initialize the predictor"
     )
-    parser.add_argument("-c", "--checkpoint", type=none_or_str, required=False, default=None) #expects best.pt
+    parser.add_argument("-c", "--checkpoint", type=none_or_str, default=None) #expects best.pt
     parser.add_argument("-e", "--experiment_folder", type=str, required=True) #empty directory for saving the output
     parser.add_argument("-d", "--dataset", type=str, required=True, default=None) #defines dataset, mandatory
     parser.add_argument("--organ", type=str, required=False, default=None) #optionally defines organ class to access. If empty, whole dataset is used

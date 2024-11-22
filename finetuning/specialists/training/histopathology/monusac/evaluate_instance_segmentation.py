@@ -82,9 +82,9 @@ def run_instance_segmentation_with_decoder_inference(model_type, checkpoint, exp
     return prediction_folder
 
 
-def eval_instance_segmentation_with_decoder(prediction_folder, experiment_folder): #removed dataset_name as argument
+def eval_instance_segmentation_with_decoder(prediction_folder, experiment_folder, dataset): #removed dataset_name as argument
     print("Evaluating", prediction_folder)
-    _, gt_paths = get_test_paths()
+    _, gt_paths = get_test_paths(dataset)
     pred_paths = get_pred_paths(prediction_folder)
     save_path = os.path.join(experiment_folder, "results", "instance_segmentation_with_decoder.csv")
     res = run_evaluation(gt_paths, pred_paths, save_path=save_path)

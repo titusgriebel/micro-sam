@@ -51,7 +51,6 @@ def main():
         ckpt = VANILLA_MODELS[args.model]
     else:
         ckpt = args.checkpoint
-
     prediction_folder = run_amg_inference(args.model, ckpt, args.experiment_folder, args.dataset)
     eval_amg(prediction_folder, args.experiment_folder, args.dataset) #deleted args.dataset as an argument for eval_amg due to error occurence
 

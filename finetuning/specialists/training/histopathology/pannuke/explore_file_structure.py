@@ -62,7 +62,7 @@ def print_tiff_shape(tiff_file_path):
 
 # Example usage:
 # image_path = "path/to/your/image.tiff"
-image_path = "/mnt/lustre-grete/usr/u12649/scratch/data/tnbc/loaded_dataset/complete_dataset/test2/test_images"
+image_path = "/mnt/lustre-grete/usr/u12649/scratch/data/monusac/loaded_dataset/complete_dataset/test2/test_images"
 
 print_tiff_shape(image_path)
 # visualize_tiff(image_path)
