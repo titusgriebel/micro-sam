@@ -7,7 +7,7 @@ from pannuke import get_pannuke_loader
 import h5py
 from torch_em.transform.label import PerObjectDistanceTransform
 import tifffile
-import micro_sam.training as sam_training
+#import micro_sam.training as sam_training
 import numpy as np
 from tqdm import tqdm
 import time

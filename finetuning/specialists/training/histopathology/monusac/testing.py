@@ -42,6 +42,5 @@ def test():
             # print("Min value:", min(unique_values))
             max_value.append(max(unique_values))
     print(f'{max(max_value)} was the maximum value of the given images')
-    
 
 test()
