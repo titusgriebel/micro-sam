@@ -87,7 +87,6 @@ def read_it_boxes_csv(path):
 read_it_boxes_csv(eval_path)
 
 
-
 def read_it_points_csv(path):
     result_dict = {
         'dataset':[],
