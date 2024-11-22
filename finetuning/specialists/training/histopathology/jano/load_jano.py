@@ -16,6 +16,7 @@ def get_dataloaders(patch_shape, data_path):
         patch_shape=patch_shape,
         batch_size=1,
         download=True,
+        annotation='nuclei',
         raw_transform=raw_transform,
         sampler=sampler,
         #offsets=None,
@@ -25,7 +26,7 @@ def get_dataloaders(patch_shape, data_path):
     return loader
 
 
-def load_nuinsseg_dataset(path):
+def load_jano_dataset(path):
     counter = 1
     _path = os.path.join(path, 'loaded_dataset', 'complete_dataset')
     jano_loader = get_dataloaders(patch_shape=(1,512,512), data_path=path)
@@ -44,6 +45,11 @@ def load_nuinsseg_dataset(path):
         tifffile.imwrite(tif_image_output_path, transposed_image_array)
         tif_label_output_path = os.path.join(label_output_path,f'{counter:04}.tiff')
         tifffile.imwrite(tif_label_output_path, label_data)
-        counter+=1
+        counter += 1
 
-load_nuinsseg_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/jano')
+
+load_jano_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/jano')
+
+
+#unpacking the .tgz file with 'tar --no-same-owner -xzvf nuclei.tgz'
+#custom unpacking requires the manual creation of the data/annotation directories

@@ -22,7 +22,7 @@ def delete_alpha_channel(path):
             print(f'Image {name} was successfully cleansed of its alpha channel')
 
 
-delete_alpha_channel('/mnt/lustre-grete/usr/u12649/scratch/data/nuinsseg/loaded_dataset/complete_dataset/images')
+#delete_alpha_channel('/mnt/lustre-grete/usr/u12649/scratch/data/nuinsseg/loaded_dataset/complete_dataset/images')
 def check_for_empty_tiff(path):
     empty_count = 0
     file_list = natsorted(os.listdir(os.path.join(path, 'labels')))
@@ -45,4 +45,4 @@ def check_for_empty_tiff(path):
     print(f'There are {label_len} images left')
             
 
-#check_for_empty_tiff('/mnt/lustre-grete/usr/u12649/scratch/data/nuinsseg/loaded_dataset/complete_dataset')
+check_for_empty_tiff('/mnt/lustre-grete/usr/u12649/scratch/data/jano/loaded_dataset/complete_dataset')

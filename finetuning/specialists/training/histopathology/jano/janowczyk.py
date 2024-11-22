@@ -23,7 +23,7 @@ from torch.utils.data import Dataset, DataLoader
 
 import torch_em
 
-from .. import util
+import util
 
 
 URL = {
@@ -64,10 +64,11 @@ def get_janowczyk_data(
     os.makedirs(path, exist_ok=True)
 
     tar_path = os.path.join(path, f"{annotation}.tgz")
+    
     util.download_source(
         path=tar_path, url=URL[annotation], download=download, checksum=CHECKSUM[annotation], verify=False
     )
-    util.unzip_tarfile(tar_path=tar_path, dst=data_dir, remove=False)
+    #util.unzip_tarfile(tar_path=tar_path, dst=data_dir, remove=False)
 
     return data_dir
 
@@ -93,6 +94,7 @@ def get_janowczyk_paths(
     if annotation == "epithelium":
         label_paths = natsorted(glob(os.path.join(data_dir, "masks", "*_mask.png")))
         raw_paths = [p.replace("masks/", "").replace("_mask.png", ".tif") for p in label_paths]
+        print('raw paths: ', len(raw_paths), 'label paths: ', len(label_paths))
     elif annotation == "tubule":
         label_paths = natsorted(glob(os.path.join(data_dir, "*_anno.bmp")))
         raw_paths = [p.replace("_anno", "") for p in label_paths]

@@ -50,7 +50,7 @@ def load_puma_dataset(path):
         # print(f"Number of 0s in the new label {counter:04}: {num_zeros}")
         # #breakpoint()
         
-        transposed_image_array = squeezed_image.transpose(1,2,0)
+        transposed_image_array = squeezed_image #removed transposition
         print(f'image {counter:04} shape: {np.shape(transposed_image_array)}, label {counter:04} shape: {np.shape(label_data)}')
         tif_image_output_path = os.path.join(image_output_path,f'{counter:04}.tiff')
         tifffile.imwrite(tif_image_output_path, transposed_image_array)

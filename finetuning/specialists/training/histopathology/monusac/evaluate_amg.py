@@ -5,28 +5,27 @@ from micro_sam.evaluation.evaluation import run_evaluation
 from micro_sam.evaluation.inference import run_amg
 #from evaluate_instance_segmentation_monusac import get_test_paths, get_val_paths
 
-from util import get_default_arguments, get_pred_paths, VANILLA_MODELS
+from util_2 import get_default_arguments, get_pred_paths, VANILLA_MODELS
 
 
-def get_val_paths(organ_type):
-    path = '/mnt/lustre-grete/usr/u12649/scratch/data/monusac/test/complete_dataset/test2'
+def get_val_paths(dataset):
+    path = os.path.join('/mnt/lustre-grete/usr/u12649/scratch/data/', f'{dataset}', 'loaded_dataset/complete_dataset/test2')
     val_image_paths = natsorted(glob(os.path.join(path, 'val_images/*')))
     val_label_paths = natsorted(glob(os.path.join(path,'val_labels/*')))
     print(len(val_image_paths), len(val_label_paths))
 
     return val_image_paths, val_label_paths
-    
 
-def get_test_paths(organ_type):
-    path = '/mnt/lustre-grete/usr/u12649/scratch/data/monusac/test/complete_dataset/test2'
+def get_test_paths(dataset):
+    path = os.path.join('/mnt/lustre-grete/usr/u12649/scratch/data/', f'{dataset}', 'loaded_dataset/complete_dataset/test2')
     test_image_paths = natsorted(glob(os.path.join(path, 'test_images/*')))
     test_label_paths = natsorted(glob(os.path.join(path, 'test_labels/*')))
     print(len(test_image_paths), len(test_label_paths))
     return test_image_paths, test_label_paths
 
-def run_amg_inference(model_type, checkpoint, experiment_folder, organ_type=None):
-    val_image_paths, val_gt_paths = get_val_paths(organ_type)
-    test_image_paths, _ = get_test_paths(organ_type)
+def run_amg_inference(model_type, checkpoint, experiment_folder, dataset):
+    val_image_paths, val_gt_paths = get_val_paths(dataset)
+    test_image_paths, _ = get_test_paths(dataset)
     prediction_folder = run_amg(
         checkpoint,
         model_type,
@@ -37,9 +36,9 @@ def run_amg_inference(model_type, checkpoint, experiment_folder, organ_type=None
     )
     return prediction_folder
 
-def eval_amg(prediction_folder, experiment_folder, organ_type=None):
+def eval_amg(prediction_folder, experiment_folder, dataset):
     print("Evaluating", prediction_folder)
-    _, gt_paths = get_test_paths(organ_type)
+    _, gt_paths = get_test_paths(dataset)
     pred_paths = get_pred_paths(prediction_folder)
     save_path = os.path.join(experiment_folder, "results", "amg.csv")
     res = run_evaluation(gt_paths, pred_paths, save_path=save_path)
@@ -53,8 +52,8 @@ def main():
     else:
         ckpt = args.checkpoint
 
-    prediction_folder = run_amg_inference(args.model, ckpt, args.experiment_folder, args.organ_type)
-    eval_amg(prediction_folder, args.experiment_folder, args.organ_type) #deleted args.dataset as an argument for eval_amg due to error occurence
+    prediction_folder = run_amg_inference(args.model, ckpt, args.experiment_folder, args.dataset)
+    eval_amg(prediction_folder, args.experiment_folder, args.dataset) #deleted args.dataset as an argument for eval_amg due to error occurence
 
 
 if __name__ == "__main__":

@@ -50,4 +50,5 @@ def load_cpm_dataset(path):
             tifffile.imwrite(tif_label_output_path, label_data)
             counter+=1
 
+
 load_cpm_dataset('/mnt/lustre-grete/usr/u12649/scratch/data')

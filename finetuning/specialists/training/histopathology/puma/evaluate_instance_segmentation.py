@@ -5,7 +5,7 @@ from micro_sam.evaluation.inference import run_instance_segmentation_with_decode
 
 
 from util_2 import get_pred_paths, get_default_arguments, VANILLA_MODELS
-from evaluate_amg_tnbc import get_test_paths, get_val_paths
+from evaluate_amg import get_test_paths, get_val_paths
 
 def run_instance_segmentation_with_decoder_inference(model_type, checkpoint, experiment_folder): #removed dataset_name as argument
     val_image_paths, val_gt_paths = get_val_paths()
@@ -33,6 +33,7 @@ def eval_instance_segmentation_with_decoder(prediction_folder, experiment_folder
 
 def main():
     args = get_default_arguments()
+
     if args.checkpoint is None:
         ckpt = VANILLA_MODELS[args.model]
     else:

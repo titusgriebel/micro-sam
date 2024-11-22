@@ -42,14 +42,13 @@ def get_pannuke_data(path, download, folds):
     """
     os.makedirs(path, exist_ok=True)
     for tmp_fold in folds:
-        # if os.path.exists(os.path.join(path, f"pannuke_{tmp_fold}.h5")):
-        #     return
+        if os.path.exists(os.path.join(path, f"pannuke_{tmp_fold}.h5")):
+            return
 
         util.download_source(os.path.join(path, f"{tmp_fold}.zip"), URLS[tmp_fold], download, CHECKSUM[tmp_fold])
 
         print(f"Unzipping the PanNuke dataset in {tmp_fold} directories...")
         util.unzip(os.path.join(path, f"{tmp_fold}.zip"), os.path.join(path, f"{tmp_fold}"), True)
-        breakpoint()
         _convert_to_hdf5(path, tmp_fold)
 
 
@@ -99,9 +98,9 @@ def _convert_to_hdf5(path, fold):
             f.create_dataset("labels/instances", data=instances, compression="gzip", chunks=other_label_chunks)
             f.create_dataset("labels/semantic", data=semantic, compression="gzip", chunks=other_label_chunks)
 
-    dir_to_rm = glob(os.path.join(path, "*[!.h5]"))
-    for tmp_dir in dir_to_rm:
-        shutil.rmtree(tmp_dir)
+    # dir_to_rm = glob(os.path.join(path, "*[!.h5]"))
+    # # for tmp_dir in dir_to_rm:
+    # #     shutil.rmtree(tmp_dir)
 
 
 def _channels_to_instances(labels):
@@ -215,7 +214,6 @@ def get_pannuke_dataset(
         assert isinstance(rois, dict)
 
     data_paths = get_pannuke_paths(path, folds, download)
-    breakpoint()
     return torch_em.default_segmentation_dataset(
         raw_paths=data_paths,
         raw_key="images",

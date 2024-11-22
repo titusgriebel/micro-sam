@@ -20,6 +20,7 @@ VANILLA_MODELS = {
     "vit_h": "/scratch-grete/projects/nim00007/sam/models/vanilla/sam_vit_h_4b8939.pth"
 }
 
+
 FILE_SPECS = {
     "lucchi": {"val": "lucchi_train_*", "test": "lucchi_test_*"},
     "nuc_mm/mouse": {"val": "nuc_mm_val_*", "test": "nuc_mm_train_*"},
@@ -220,6 +221,7 @@ def get_default_arguments():
     )
     parser.add_argument("-c", "--checkpoint", type=none_or_str, default=None) #expects best.pt
     parser.add_argument("-e", "--experiment_folder", type=str, required=True) #empty directory for saving the output
+    parser.add_argument("-d", "--dataset", type=str, required=True, default=None) #defines dataset, mandatory
     parser.add_argument("--organ", type=str, required=False, default=None) #optionally defines organ class to access. If empty, whole dataset is used
     parser.add_argument("--box", action="store_true", help="If passed, starts with first prompt as box") #otherwise, point
     parser.add_argument(

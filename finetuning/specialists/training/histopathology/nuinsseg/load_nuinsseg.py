@@ -27,7 +27,7 @@ def get_dataloaders(patch_shape, data_path):
 
 def load_nuinsseg_dataset(path):
     counter = 1
-    _path = os.path.join(path, 'loaded_dataset', 'complete_dataset')
+    _path = os.path.join(path, 'test', 'loaded_dataset', 'complete_dataset')
     puma_loader = get_dataloaders(patch_shape=(1,512,512), data_path=path)
     image_output_path = os.path.join(_path, 'images')
     label_output_path = os.path.join(_path, 'labels')

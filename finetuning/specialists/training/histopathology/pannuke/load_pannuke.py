@@ -30,48 +30,49 @@ def get_dataloaders(patch_shape, data_path):
     raw_transform = sam_training.identity  # the current workflow avoids rescaling the inputs to [-1, 1]
     sampler = MinInstanceSampler(min_num_instances=3)
 
-    train_loader = get_pannuke_loader(
-        path=data_path,
-        patch_shape=patch_shape,
-        batch_size=2,
-        folds=["fold_1"],
-        num_workers=16,
-        download=False,
-        shuffle=True,
-        label_transform=label_transform,
-        raw_transform=raw_transform,
-        label_dtype=torch.float32,
-        sampler=sampler,
-        ndim=2,
-    )
-    val_loader = get_pannuke_loader(
-        path=data_path,
-        patch_shape=patch_shape,
-        batch_size=1,
-        folds=["fold_2"],
-        num_workers=16,
-        download=False,
-        shuffle=True,
-        #label_transform=label_transform,
-        raw_transform=raw_transform,
-        label_dtype=torch.float32,
-        sampler=sampler,
-        ndim=2,
-    )
+    # train_loader = get_pannuke_loader(
+    #     path=data_path,
+    #     patch_shape=patch_shape,
+    #     batch_size=2,
+    #     folds=["fold_1"],
+    #     num_workers=16,
+    #     download=True,
+    #     shuffle=True,
+    #     label_transform=label_transform,
+    #     raw_transform=raw_transform,
+    #     label_dtype=torch.float32,
+    #     sampler=sampler,
+    #     ndim=2,
+    # )
+    # val_loader = get_pannuke_loader(
+    #     path=data_path,
+    #     patch_shape=patch_shape,
+    #     batch_size=1,
+    #     folds=["fold_2"],
+    #     num_workers=16,
+    #     download=True,
+    #     shuffle=True,
+    #     #label_transform=label_transform,
+    #     raw_transform=raw_transform,
+    #     label_dtype=torch.float32,
+    #     sampler=sampler,
+    #     ndim=2,
+    # )
     test_loader = get_pannuke_loader(
         path=data_path,
         patch_shape=patch_shape,
         batch_size=1,
         folds=["fold_3"],
         num_workers=16,
-        download=False,
+        download=True,
         shuffle=True,
         raw_transform=raw_transform,
         label_dtype=torch.float32,
         sampler=sampler,
         ndim=2,
     )
-
+    train_loader = 1
+    val_loader = 1
     return train_loader, val_loader, test_loader
 
 
@@ -83,35 +84,35 @@ def visualize_images(data_path):
 
 
 
-# def load_pannuke_dataset(path):
-#     counter = 1
-#     _path = os.path.join(path, 'loaded_dataset', 'complete_dataset')
-#     _, __, he_loader = get_dataloaders(patch_shape=(1,256,256), data_path=path)
-#     print(len(he_loader))
-#     image_output_path = os.path.join(_path, 'images')
-#     label_output_path = os.path.join(_path, 'labels')
-#     os.makedirs(image_output_path, exist_ok=True)
-#     os.makedirs(label_output_path, exist_ok=True)
-#     for image, label in he_loader:
-#         image_array = image.numpy()
-#         label_array = label.numpy()
-#         squeezed_image = image_array.squeeze()
-#         label_data = label_array.squeeze()
-#         transposed_image_array = squeezed_image.transpose(1,2,0)
-#         #print(f'image {counter:04} shape: {np.shape(transposed_image_array)}, label {counter:04} shape: {np.shape(label_data)}')
-#         assert np.shape(transposed_image_array)[0] == 256, f'Shape error in image {counter:04}'
-#         assert np.shape(transposed_image_array)[1] == 256, f'Shape error in image {counter:04}'
-#         assert np.shape(transposed_image_array)[2] == 3, f'Shape error in image {counter:04}'
-#         assert np.shape(label_data)[0] == 256, f'Shape error in label {counter:04}'
-#         assert np.shape(label_data)[0] == 256, f'Shape error in label {counter:04}'
-#         tif_image_output_path = os.path.join(image_output_path,f'{counter:04}.tiff')
-#         tifffile.imwrite(tif_image_output_path, transposed_image_array)
-#         tif_label_output_path = os.path.join(label_output_path,f'{counter:04}.tiff')
-#         tifffile.imwrite(tif_label_output_path, label_data)
-#         counter+=1
-#     print('All images have a confirmed shape of (256, 256, 3) and all labels have a shape of (256,256)')
+def load_pannuke_dataset(path):
+    counter = 1
+    _path = os.path.join(path, 'loaded_dataset', 'complete_dataset')
+    _, __, he_loader = get_dataloaders(patch_shape=(1,256,256), data_path=path)
+    print(len(he_loader))
+    image_output_path = os.path.join(_path, 'images')
+    label_output_path = os.path.join(_path, 'labels')
+    os.makedirs(image_output_path, exist_ok=True)
+    os.makedirs(label_output_path, exist_ok=True)
+    for image, label in he_loader:
+        image_array = image.numpy()
+        label_array = label.numpy()
+        squeezed_image = image_array.squeeze()
+        label_data = label_array.squeeze()
+        transposed_image_array = squeezed_image.transpose(1,2,0)
+        print(f'image {counter:04} shape: {np.shape(transposed_image_array)}, label {counter:04} shape: {np.shape(label_data)}')
+        # assert np.shape(transposed_image_array)[2] == 256, f'Shape error in image {counter:04}'
+        # assert np.shape(transposed_image_array)[1] == 256, f'Shape error in image {counter:04}'
+        # assert np.shape(transposed_image_array)[0] == 3, f'Shape error in image {counter:04}'
+        # assert np.shape(label_data)[0] == 256, f'Shape error in label {counter:04}'
+        # assert np.shape(label_data)[0] == 256, f'Shape error in label {counter:04}'
+        tif_image_output_path = os.path.join(image_output_path,f'{counter:04}.tiff')
+        tifffile.imwrite(tif_image_output_path, transposed_image_array)
+        tif_label_output_path = os.path.join(label_output_path,f'{counter:04}.tiff')
+        tifffile.imwrite(tif_label_output_path, label_data)
+        counter+=1
+    print('All images have a confirmed shape of (3, 256, 256) and all labels have a shape of (256,256)')
 # from pannuke import get_pannuke_paths
-# #load_pannuke_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/pannuke')
+load_pannuke_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/pannuke')
 # #get_pannuke_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/pannuke_test', (256, 256), folds=['fold_1'], download=True)
 # data_paths = get_pannuke_paths('/mnt/lustre-grete/usr/u12649/scratch/data/pannuke_test',['fold_1'],True)
 

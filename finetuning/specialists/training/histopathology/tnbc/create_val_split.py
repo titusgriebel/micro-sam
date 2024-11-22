@@ -116,4 +116,4 @@ def check_lynsec(path):
         npdata = tifffile.imread(image_path)
         print(npdata.shape)
 
-check_lynsec('/mnt/lustre-grete/usr/u12649/scratch/data/tnbc/loaded_dataset/complete_dataset/test3')
+check_lynsec('/mnt/lustre-grete/usr/u12649/scratch/data/tnbc/loaded_dataset/complete_dataset/test2')

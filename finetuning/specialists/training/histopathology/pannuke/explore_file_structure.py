@@ -48,20 +48,21 @@ from PIL import Image
 #     print(f"Error opening TIFF file: {e}")
 
 # # Example usage:
-    
+import os
+from glob import glob 
+import numpy as np
+import tifffile as tiff
 
 def print_tiff_shape(tiff_file_path):
-  try:
-    img = Image.open(tiff_file_path)
-    print(img.size)  # This will print the width and height as a tuple
-    img.show()
-  except Exception as e:
-    print(f"Error opening TIFF file: {e}")
-
+  for image_path in glob(os.path.join(tiff_file_path, '*.tiff')):
+    image = tiff.imread(image_path)
+    img = np.array(image)
+    print(img.shape)  # This will print the width and height as a tuple
+    
 
 # Example usage:
 # image_path = "path/to/your/image.tiff"
-image_path = "/scratch/users/u11644/data/pannuke/fold2_as_tiff/images/image_430.tiff"
+image_path = "/mnt/lustre-grete/usr/u12649/scratch/data/tnbc/loaded_dataset/complete_dataset/test2/test_images"
 
 print_tiff_shape(image_path)
 # visualize_tiff(image_path)

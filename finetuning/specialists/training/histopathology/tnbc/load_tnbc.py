@@ -30,8 +30,8 @@ def get_dataloaders(patch_shape, data_path):
 
 def load_tnbc_dataset(path):
     counter = 1
-    _path = os.path.join(path, 'loaded_dataset', 'complete_dataset')
-    he_loader = get_dataloaders(patch_shape=(1,512,512), data_path=path)
+    _path = os.path.join(path, 'test', 'loaded_dataset', 'complete_dataset')
+    he_loader = get_dataloaders(patch_shape=(1, 512, 512), data_path=path)
 
     image_output_path = os.path.join(_path, 'images')
     label_output_path = os.path.join(_path, 'labels')
@@ -61,4 +61,4 @@ def load_tnbc_dataset(path):
 #load_tnbc_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/tnbc')
 
 from tnbc import get_tnbc_dataset
-get_tnbc_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/tnbc/test',(512,512),download=True)
+get_tnbc_dataset('/mnt/lustre-grete/usr/u12649/scratch/data/tnbc/',(512,512),download=True)

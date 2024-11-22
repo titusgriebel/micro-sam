@@ -133,6 +133,8 @@ def get_tnbc_dataset(
     get_tiffs(path)
     image_paths = natsorted(glob(os.path.join(path, 'images', '*.tiff')))
     label_paths = natsorted(glob(os.path.join(path, 'labels', '*.tiff')))
+    print(len(image_paths), len(label_paths))
+    breakpoint()
     kwargs, _ = util.add_instance_label_transform(
         kwargs, add_binary_target=True, binary=False, boundaries=False, offsets=None
     )
