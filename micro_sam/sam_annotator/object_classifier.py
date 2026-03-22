@@ -1,5 +1,5 @@
 import os
-from joblib import dump
+from joblib import dump, load
 from multiprocessing import cpu_count
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
@@ -46,24 +46,34 @@ def _accumulate_labels(segmentation, annotations):
     return all_features["majority_label"].astype("int")
 
 
-def _train_rf(features, labels, previous_features=None, previous_labels=None, **rf_kwargs):
+def _train_rf(features, labels, previous_features=None, previous_labels=None, save_training_data=False, **rf_kwargs):
     assert len(features) == len(labels)
     valid = labels != 0
     X, y = features[valid], labels[valid]
 
     if previous_features is not None:
+        print("Using previous features and labels for training.")
         assert previous_labels is not None and len(previous_features) == len(previous_labels)
         X = np.concatenate([previous_features, X], axis=0)
         y = np.concatenate([previous_labels, y], axis=0)
 
     rf = RandomForestClassifier(**rf_kwargs)
     rf.fit(X, y)
+
+    if save_training_data:
+        state = AnnotatorState()
+        if hasattr(state, "features_output") and hasattr(state, "labels_output"):
+            os.makedirs(os.path.dirname(state.features_output), exist_ok=True)
+            os.makedirs(os.path.dirname(state.labels_output), exist_ok=True)
+            np.save(state.features_output, X)
+            np.save(state.labels_output, y)
+
     return rf
 
 
 # TODO do we add a shortcut?
-@magic_factory(call_button="Train and predict")
-def _train_and_predict_rf_widget(viewer: "napari.viewer.Viewer") -> None:
+@magic_factory(call_button="Train and predict", save_training_data={"label": "Save training data"})
+def _train_and_predict_rf_widget(viewer: "napari.viewer.Viewer", save_training_data: bool = True) -> None:
     # Get the object features and the annotations.
     state = AnnotatorState()
     state.annotator._require_layers()
@@ -88,8 +98,41 @@ def _train_and_predict_rf_widget(viewer: "napari.viewer.Viewer") -> None:
     # Run RF training and store it in the state.
     rf = _train_rf(
         features, labels, previous_features=previous_features, previous_labels=previous_labels,
-        n_estimators=200, max_depth=10, n_jobs=cpu_count(),
+        n_estimators=200, max_depth=10, n_jobs=cpu_count(), save_training_data=save_training_data,
     )
+    state.object_rf = rf
+
+    # Run and set the prediction.
+    pred = rf.predict(features)
+    prediction_data = project_prediction_to_segmentation(segmentation, pred, seg_ids)
+    viewer.layers["prediction"].data = prediction_data
+
+    state.annotator._refresh_label_widget()
+
+
+@magic_factory(call_button="Load model and predict")
+def _load_and_predict_rf_widget(viewer: "napari.viewer.Viewer") -> None:
+    # Get the object features and the annotations.
+
+    state = AnnotatorState()
+    if not os.path.exists(state.rf_path):
+        return widgets._generate_message("error", "State path for RF classifier does not exist.")
+    state.annotator._require_layers()
+    segmentation = state.segmentation_selection.get_value().data
+
+    if state.object_features is None:
+        if widgets._validate_embeddings(viewer):
+            return None
+        image_embeddings = state.image_embeddings
+        seg_ids, features = compute_object_features(image_embeddings, segmentation)
+        state.seg_ids = seg_ids
+        state.object_features = features
+    else:
+        features, seg_ids = state.object_features, state.seg_ids
+
+    # Load RF state
+    rf = load(state.rf_path)
+    print(f"Loaded RF classifier from {state.rf_path}")
     state.object_rf = rf
 
     # Run and set the prediction.
@@ -214,6 +257,9 @@ class ObjectClassifier(QtWidgets.QScrollArea):
         # Create the widget for training and prediction of the classifier.
         self._train_and_predict_widget = _train_and_predict_rf_widget()
 
+        # Create the widget for loading and prediction of the classifier.
+        self._load_and_predict_widget = _load_and_predict_rf_widget()
+
         # Create the widget for segmentation selection.
         self._seg_selection_widget = self._create_segmentation_layer_section()
 
@@ -227,6 +273,7 @@ class ObjectClassifier(QtWidgets.QScrollArea):
             "embeddings": self._embedding_widget,
             "segmentation_selection": self._seg_selection_widget,
             "train_and_predict": self._train_and_predict_widget,
+            "load_and_predict": self._load_and_predict_widget,
             "label_widget": self._label_widget,
             "export_rf": self._export_rf_widget,
         }
