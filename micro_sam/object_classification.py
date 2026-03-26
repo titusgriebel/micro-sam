@@ -9,10 +9,10 @@ from nifty.tools import blocking, takeDict
 from skimage.measure import regionprops_table
 from skimage.transform import resize
 
-try:
-    from napari.utils import progress as tqdm
-except ImportError:
-    from tqdm import tqdm
+# try:
+#     from napari.utils import progress as tqdm
+# except ImportError:
+from tqdm import tqdm
 
 from .import util
 
@@ -149,7 +149,6 @@ def compute_object_features(
     seg_embed_generator, n_gen = _create_seg_and_embed_generator(
         segmentation, image_embeddings, is_tiled=is_tiled, is_3d=is_3d
     )
-
     for seg, embeds in tqdm(
         seg_embed_generator(), total=n_gen, disable=not verbose, desc="Compute object features"
     ):

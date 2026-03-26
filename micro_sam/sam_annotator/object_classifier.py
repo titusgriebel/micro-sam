@@ -7,6 +7,8 @@ from typing import List, Optional, Tuple, Union
 import imageio.v3 as imageio
 import napari
 import numpy as np
+from glob import glob
+from natsort import natsorted
 import torch
 
 from magicgui import magic_factory, magicgui
@@ -46,6 +48,14 @@ def _accumulate_labels(segmentation, annotations):
     return all_features["majority_label"].astype("int")
 
 
+def _get_available_training_data():
+    state = AnnotatorState()
+    if hasattr(state, "rf_dir"):
+        return set([path.split("-")[0] for path in os.listdir(state.rf_dir) if path.endswith(".npy")])
+    else:
+        return []
+
+
 def _train_rf(features, labels, previous_features=None, previous_labels=None, save_training_data=False, **rf_kwargs):
     assert len(features) == len(labels)
     valid = labels != 0
@@ -72,13 +82,20 @@ def _train_rf(features, labels, previous_features=None, previous_labels=None, sa
 
 
 # TODO do we add a shortcut?
-@magic_factory(call_button="Train and predict", save_training_data={"label": "Save training data"})
-def _train_and_predict_rf_widget(viewer: "napari.viewer.Viewer", save_training_data: bool = True) -> None:
+@magic_factory(call_button="Train and predict", save_training_data={"label": "Save training data"},
+               cached_training_data={"choices": _get_available_training_data})
+def _train_and_predict_rf_widget(viewer: "napari.viewer.Viewer", save_training_data: bool = True,
+                                 cached_training_data: List[str] = None) -> None:
     # Get the object features and the annotations.
     state = AnnotatorState()
     state.annotator._require_layers()
     annotations = viewer.layers["annotations"].data
     segmentation = state.segmentation_selection.get_value().data
+
+    if cached_training_data:
+        state.previous_features = np.concatenate([np.load(os.path.join(state.rf_dir, tr_path) 
+                                                 for tr_path in cached_training_data)], axis=0)
+        state.previous_labels = np.c
 
     if state.object_features is None:
         if widgets._validate_embeddings(viewer):
@@ -110,13 +127,20 @@ def _train_and_predict_rf_widget(viewer: "napari.viewer.Viewer", save_training_d
     state.annotator._refresh_label_widget()
 
 
+def _get_rf_versions():
+    state = AnnotatorState()
+    if not hasattr(state, state.rf_dir):
+        return []
+    else:
+        return natsorted([rf_name.split(".")[0] for rf_name in os.listdir(state.rf_dir) if rf_name.endswith(".joblib")])
+
+
 @magic_factory(call_button="Load model and predict")
-def _load_and_predict_rf_widget(viewer: "napari.viewer.Viewer") -> None:
+def _load_and_predict_rf_widget(viewer: "napari.viewer.Viewer", rf_version: str = {"choices": _get_rf_versions}) -> None:
     # Get the object features and the annotations.
 
     state = AnnotatorState()
-    if not os.path.exists(state.rf_path):
-        return widgets._generate_message("error", "State path for RF classifier does not exist.")
+    rf_path = os.path.join(state.rf_dir, f"{rf_version}.joblib")
     state.annotator._require_layers()
     segmentation = state.segmentation_selection.get_value().data
 
@@ -131,8 +155,8 @@ def _load_and_predict_rf_widget(viewer: "napari.viewer.Viewer") -> None:
         features, seg_ids = state.object_features, state.seg_ids
 
     # Load RF state
-    rf = load(state.rf_path)
-    print(f"Loaded RF classifier from {state.rf_path}")
+    rf = load(rf_path)
+    print(f"Loaded RF classifier from {rf_path}")
     state.object_rf = rf
 
     # Run and set the prediction.
@@ -143,8 +167,20 @@ def _load_and_predict_rf_widget(viewer: "napari.viewer.Viewer") -> None:
     state.annotator._refresh_label_widget()
 
 
+# TODO: get function to automatically suggest new non-existing version rf to save
+def _get_rf_output_path():
+    state = AnnotatorState()
+    existing_versions = _get_rf_versions()
+    if not hasattr(state, "rf_dir"):
+        return None
+    if existing_versions:
+        return os.path.join(state.rf_dir, f"rf_{existing_versions[-1].split('_')[-1] + 1}.joblib")
+    else:
+        return os.path.join(state.rf_dir, "rf_1.joblib")
+
+
 @magic_factory(call_button="Export Classifier")
-def _create_export_rf_widget(export_path: Optional[Path] = None) -> None:
+def _create_export_rf_widget(export_path: Optional[Path] = _get_rf_output_path) -> None:
     state = AnnotatorState()
     rf = state.object_rf
     if rf is None:
