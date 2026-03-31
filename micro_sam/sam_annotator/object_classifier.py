@@ -1,4 +1,5 @@
 import os
+from collections import defaultdict
 from joblib import dump, load
 from multiprocessing import cpu_count
 from pathlib import Path
@@ -6,17 +7,18 @@ from typing import List, Optional, Tuple, Union
 
 import imageio.v3 as imageio
 import napari
+import h5py
 import numpy as np
-from glob import glob
 from natsort import natsorted
 import torch
 
 from magicgui import magic_factory, magicgui
-from magicgui.widgets import Widget, Container, FunctionGui, create_widget
+from magicgui.widgets import Widget, Container, FunctionGui, PushButton, create_widget, ListEdit
 from qtpy import QtWidgets
 
 from skimage.measure import regionprops_table
 from sklearn.ensemble import RandomForestClassifier
+
 
 from .. import util
 from ..object_classification import compute_object_features, project_prediction_to_segmentation
@@ -48,18 +50,48 @@ def _accumulate_labels(segmentation, annotations):
     return all_features["majority_label"].astype("int")
 
 
-def _get_available_training_data():
+def _get_available_training_data_names(widget=None) -> List[str]:
     state = AnnotatorState()
-    if hasattr(state, "rf_dir"):
-        return set([path.split("-")[0] for path in os.listdir(state.rf_dir) if path.endswith(".npy")])
+    if hasattr(state, "train_data_path"):
+        with h5py.File(state.train_data_path, 'a') as f:
+            f.require_group("features")
+            return list(f["features"].keys())
     else:
         return []
 
 
-def _train_rf(features, labels, previous_features=None, previous_labels=None, save_training_data=False, **rf_kwargs):
+def _get_available_training_data(chosen_training_data) -> Tuple[np.ndarray, np.ndarray]:
+    state = AnnotatorState()
+    with h5py.File(state.train_data_path, 'r') as f:
+        loaded_features = np.concatenate([f[f"features/{chosen_sample}"][:] for chosen_sample in chosen_training_data], axis=0)
+        loaded_labels = np.concatenate([f[f"labels/{chosen_sample}"][:] for chosen_sample in chosen_training_data], axis=0)
+    return loaded_features, loaded_labels
+
+
+def _save_training_data(overwrite_training_data, features, labels):
+    state = AnnotatorState()
+    if all(hasattr(state, attr) for attr in ['train_data_path', 'img_name']):
+        with h5py.File(state.train_data_path, 'a') as f:
+            if f"features/{state.img_name}" in f:
+                if overwrite_training_data:
+                    del f[f"features/{state.img_name}"]
+                    del f[f"labels/{state.img_name}"]
+                else:
+                    return
+            f.require_group("features")
+            f.require_group("labels")
+            f.create_dataset(f"features/{state.img_name}", data=features)
+            f.create_dataset(f"labels/{state.img_name}", data=labels)
+
+
+def _train_rf(features, labels, previous_features=None, previous_labels=None, save_training_data=False,
+              overwrite_training_data=False, **rf_kwargs):
     assert len(features) == len(labels)
     valid = labels != 0
     X, y = features[valid], labels[valid]
+
+    if save_training_data:
+        _save_training_data(overwrite_training_data, X, y)
 
     if previous_features is not None:
         print("Using previous features and labels for training.")
@@ -68,24 +100,17 @@ def _train_rf(features, labels, previous_features=None, previous_labels=None, sa
         y = np.concatenate([previous_labels, y], axis=0)
 
     rf = RandomForestClassifier(**rf_kwargs)
-    rf.fit(X, y)
 
-    if save_training_data:
-        state = AnnotatorState()
-        if hasattr(state, "features_output") and hasattr(state, "labels_output"):
-            os.makedirs(os.path.dirname(state.features_output), exist_ok=True)
-            os.makedirs(os.path.dirname(state.labels_output), exist_ok=True)
-            np.save(state.features_output, X)
-            np.save(state.labels_output, y)
+    rf.fit(X, y)
 
     return rf
 
 
 # TODO do we add a shortcut?
 @magic_factory(call_button="Train and predict", save_training_data={"label": "Save training data"},
-               cached_training_data={"choices": _get_available_training_data})
+               cached_training_data={"widget_type": ListEdit, "value": []})
 def _train_and_predict_rf_widget(viewer: "napari.viewer.Viewer", save_training_data: bool = True,
-                                 cached_training_data: List[str] = None) -> None:
+                                 cached_training_data: List[str] = None, overwrite_training_data: bool = False) -> None:
     # Get the object features and the annotations.
     state = AnnotatorState()
     state.annotator._require_layers()
@@ -93,11 +118,8 @@ def _train_and_predict_rf_widget(viewer: "napari.viewer.Viewer", save_training_d
     segmentation = state.segmentation_selection.get_value().data
 
     if cached_training_data:
-        state.previous_features = np.concatenate([np.load(os.path.join(state.rf_dir, tr_path) 
-                                                 for tr_path in cached_training_data)], axis=0)
-        state.previous_labels = np.c
-
-    if state.object_features is None:
+        state.previous_features, state.previous_labels = _get_available_training_data(cached_training_data)
+    if state.object_features is None: 
         if widgets._validate_embeddings(viewer):
             return None
         image_embeddings = state.image_embeddings
@@ -111,11 +133,11 @@ def _train_and_predict_rf_widget(viewer: "napari.viewer.Viewer", save_training_d
     labels = _accumulate_labels(segmentation, annotations)
     if (labels == 0).all() and (previous_labels is None):
         return widgets._generate_message("error", "You have not provided any annotations.")
-
     # Run RF training and store it in the state.
     rf = _train_rf(
         features, labels, previous_features=previous_features, previous_labels=previous_labels,
         n_estimators=200, max_depth=10, n_jobs=cpu_count(), save_training_data=save_training_data,
+        overwrite_training_data=overwrite_training_data
     )
     state.object_rf = rf
 
@@ -127,16 +149,16 @@ def _train_and_predict_rf_widget(viewer: "napari.viewer.Viewer", save_training_d
     state.annotator._refresh_label_widget()
 
 
-def _get_rf_versions():
+def _get_rf_versions(widget=None):
     state = AnnotatorState()
-    if not hasattr(state, state.rf_dir):
+    if not hasattr(state, "rf_dir"):
         return []
     else:
         return natsorted([rf_name.split(".")[0] for rf_name in os.listdir(state.rf_dir) if rf_name.endswith(".joblib")])
 
 
-@magic_factory(call_button="Load model and predict")
-def _load_and_predict_rf_widget(viewer: "napari.viewer.Viewer", rf_version: str = {"choices": _get_rf_versions}) -> None:
+@magic_factory(call_button="Load model and predict", rf_version={"choices": _get_rf_versions, "label": "RF version to load"})
+def _load_and_predict_rf_widget(viewer: "napari.viewer.Viewer", rf_version: str = None) -> None:
     # Get the object features and the annotations.
 
     state = AnnotatorState()
@@ -168,36 +190,37 @@ def _load_and_predict_rf_widget(viewer: "napari.viewer.Viewer", rf_version: str 
 
 
 # TODO: get function to automatically suggest new non-existing version rf to save
-def _get_rf_output_path():
+def _get_rf_output_path(widget=None):
     state = AnnotatorState()
     existing_versions = _get_rf_versions()
     if not hasattr(state, "rf_dir"):
         return None
     if existing_versions:
-        return os.path.join(state.rf_dir, f"rf_{existing_versions[-1].split('_')[-1] + 1}.joblib")
+        return os.path.join(state.rf_dir, f"rf_{int(existing_versions[-1].split('_')[-1]) + 1}.joblib")
     else:
         return os.path.join(state.rf_dir, "rf_1.joblib")
 
 
-@magic_factory(call_button="Export Classifier")
-def _create_export_rf_widget(export_path: Optional[Path] = _get_rf_output_path) -> None:
+@magic_factory(call_button="Export Classifier", rf_outpath={"label": "RF output path", "value": str(_get_rf_output_path())})
+def _create_export_rf_widget(rf_outpath: Optional[str] = "") -> None:
     state = AnnotatorState()
     rf = state.object_rf
     if rf is None:
         return widgets._generate_message("error", "You have not run training yet.")
-    if export_path is None or export_path == "":
+    if rf_outpath is None or rf_outpath == "":
         return widgets._generate_message("error", "You have to provide an export path.")
     # Do we add an extension? .joblib?
-    dump(rf, export_path)
+    dump(rf, rf_outpath)
     # TODO show an info method about the export
 
 #
 # Object classifier implementation.
 #
 
-
 # TODO add a gui element that shows the current label ids, how many objects are labeled, and that
 # enables naming them so that the user can keep track of what has been labeled
+
+
 class ObjectClassifier(QtWidgets.QScrollArea):
 
     def _require_layers(self, layer_choices: Optional[List[str]] = None):
@@ -312,6 +335,8 @@ class ObjectClassifier(QtWidgets.QScrollArea):
             "load_and_predict": self._load_and_predict_widget,
             "label_widget": self._label_widget,
             "export_rf": self._export_rf_widget,
+            "refresh_default_values": self.refresh_btn,
+            "get_annotation_statistics": self.annotation_statistics,
         }
 
     def __init__(self, viewer: "napari.viewer.Viewer") -> None:
@@ -330,6 +355,11 @@ class ObjectClassifier(QtWidgets.QScrollArea):
         self._shape = (256, 256)
         self._require_layers()
         self._ndim = len(self._shape)
+
+        self.refresh_btn = PushButton(name="Refresh Defaults")
+        self.annotation_statistics = PushButton(name="Get annotation statistics")
+        self.refresh_btn.clicked.connect(self._refresh_values)
+        self.annotation_statistics.clicked.connect(self._get_annotated_instances_per_class)
 
         # Create all the widgets and add them to the layout.
         self._label_names = {}  # The names for the object labels.
@@ -363,6 +393,7 @@ class ObjectClassifier(QtWidgets.QScrollArea):
         # Add the widget to the scroll area.
         self.setWidgetResizable(True)  # Allow widget to resize within scroll area.
         self.setWidget(self._annotator_widget)
+        self._refresh_values()
 
     def _update_image(self, segmentation_result=None):
         state = AnnotatorState()
@@ -390,6 +421,24 @@ class ObjectClassifier(QtWidgets.QScrollArea):
         self._viewer.layers["annotations"].scale = scale
         self._viewer.layers["prediction"].data = np.zeros(self._shape, dtype="uint32")
         self._viewer.layers["prediction"].scale = scale
+
+    def _refresh_values(self):
+        self._export_rf_widget.rf_outpath.value = _get_rf_output_path()
+        self._train_and_predict_widget.cached_training_data.value = _get_available_training_data_names()
+        self._load_and_predict_widget.rf_version.choices = _get_rf_versions()
+
+    def _get_annotated_instances_per_class(self):
+        segmentation = self._viewer.layers["segmentation"].data
+        annotation = self._viewer.layers["annotations"].data
+        unique_classes = np.unique(annotation)
+        if len(unique_classes) == 0:
+            print("No annotations captured so far.")
+        else:
+            for class_id in np.unique(annotation):
+                if class_id == 0:
+                    continue
+                class_mask = (annotation == class_id)
+                print(f"Class instances for {class_id}: {np.unique(segmentation[class_mask]) - 1} \n")
 
 
 def object_classifier(
