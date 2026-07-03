@@ -1,0 +1,179 @@
+Histopathology Pixel Classifier — Tool Specification
+=====================================================
+
+Purpose
+-------
+Annotate histopathology tiles (center ROI of padded images) and train a pixel
+classifier using SAM embeddings stored in h5 files produced by
+``extract_ann_images.py``.
+
+Input
+-----
+Single h5 file per session containing:
+  - ``images``: dataset (N, max_h, max_w, 3), uint8 RGB, zero-padded
+  - ``masks``: dataset (N, max_h, max_w), uint8 binary tissue mask
+  - ``images.attrs.filenames``: list of image names
+  - ``images.attrs.num_images``: count N
+
+ROI extraction
+--------------
+For each image: take the exact center 1/9 tile
+  y_start = max_h // 3,  y_end = 2 * max_h // 3
+  x_start = max_w // 3,  x_end = 2 * max_w // 3
+Everything operates in ROI coordinate space (no transforms needed).
+
+Model
+-----
+SAM v1 fine-tuned for histopathology: ``vit_b_histopathology``
+(No SAM2, no tiling, no 3D.)
+
+Embeddings
+----------
+Computed on-demand per image via ``state.initialize_predictor()``.
+No batch precomputation. No cache-restore dialog (yet) — just fresh compute.
+
+Class IDs (hardcoded)
+---------------------
+  2: tumor
+  3: stroma
+  4: necrosis
+  5: lymphocyte
+  6: background
+
+Widgets (top to bottom in dock panel)
+-------------------------------------
+1. Label Buttons — grid of color-swatched buttons; click sets
+   ``annotations.selected_label`` and switches paint mode.
+2. Erase Non-Tissue [E] — sets annotation data to 0 where tissue mask == 0.
+3. Next [→] — advances to next image in the h5 file, clears layers, forces
+   new embeddings.
+4. Train and Predict [Shift+T] — trains RandomForest on tissue-masked labels,
+   predicts, shows result in "prediction" layer.
+   Also has an "Apply to Volume" checkbox (hidden for 2D).
+5. Save [S] — writes ``predictions/<image_name>/prediction`` and
+   ``annotations`` datasets to the same h5 file.
+6. Classification Settings ▼ — PCA dimensionality, AnyUp upsampling, random
+   seed, load/export classifier.
+
+Non-tissue handling
+-------------------
+- Training: only pixels with (label != 0) AND (mask == 255) enter the
+  RandomForest feature matrix. Label-0 pixels with mask == 0 are included
+  as unlabeled background (only if tissue).
+- Prediction: all predicted labels where mask == 0 are force-set to 0.
+- Erase button: immediate cleanup of scribbles in non-tissue areas.
+
+Output in h5
+------------
+After Save, the file gains a ``predictions/`` group:
+  predictions/
+    <image_name>/
+      prediction   (int32, ROI shape)   — classifier output
+      annotations  (int32, ROI shape)   — ground truth scribbles
+    h5_path    (str, attr)
+    class_ids  (str, attr)              — repr(CLASS_IDS)
+    n_saved    (int, attr)              — count of saved images
+
+Layer names used
+----------------
+- ``image`` — the current ROI loaded from h5
+- ``annotations`` — user paint layer (scribbles)
+- ``prediction`` — classifier prediction after "Train and Predict"
+
+Navigation
+----------
+Next image: cycles forward with wrap-around. No back/prev.
+One h5 file per session.
+
+Technical notes
+---------------
+- Inherits from ``_ClassifierBase`` (micro_sam.sam_annotator._annotator).
+- Overrides: ``_compute_features``, ``_train``, ``_project_prediction``,
+  ``_predict_and_show``, ``_update_image``, ``_extra_classification_sections``.
+- Embedding dimension: 256 (SAM v1 default).
+- No modifications to micro-sam internals — all code in this script.
+
+Usage
+-----
+  python scripts/histopathology_classifier.py /path/to/data.h5
+
+User Requirements & Implementation Status
+------------------------------------------
+
+1. Load annotation tiles from h5 files (as stored by extract_ann_images.py)
+   --> Implemented. Single h5 per session, loaded via histopathology_spec.txt
+       file chooser or CLI arg. Reads images/masks datasets and filenames attr.
+
+2. Only the center square of 9 equal-sized squares is the ROI
+   --> Implemented. Exact floor-division center: y_start/max_h/3, y_end/2*max_h/3,
+       x_start/max_w/3, x_end/2*max_w/3. All code operates in ROI space.
+
+3. Only annotations inside the ROI are considered for Random Forest training
+   --> Implemented. Tissue mask (from original h5 "masks" dataset) is applied:
+       only pixels with (label != 0) AND (mask == 255) enter the RF training set.
+
+4. Only the ROI center is predicted on (not the full padded image)
+   --> Implemented. Embeddings, features, labels, and prediction are all in ROI
+       coordinate space. The ROI shape (h//3, w//3) is used for all transforms.
+
+5. Use vit_b_histopathology as the model
+   --> Implemented. Hardcoded as MODEL_TYPE = "vit_b_histopathology".
+
+6. Add a widget that saves the final annotation/prediction to the h5 file
+   --> Implemented. "Save [S]" button writes a "predictions/<img_name>/" group
+       under the same h5 file with "prediction" and "annotations" datasets.
+
+7. Add a widget that selects a different class ID for the paint brush
+   --> Implemented. "Label Buttons" widget: grid of color-swatched buttons.
+       Clicking a button sets annotations.selected_label to that ID.
+
+8. Classes and their IDs provided as a dict (with dummy values)
+   --> Implemented. CLASS_IDS = {2: tumor, 3: stroma, 4: necrosis,
+       5: lymphocyte, 6: background}, hardcoded.
+
+9. Do not change micro_sam scripts in place — create a new wrapper script
+   --> Implemented. Everything lives in scripts/histopathology_classifier.py.
+       Zero modifications to micro_sam internals.
+
+10. Force non-tissue prediction pixels to 0
+    --> Implemented. After rf.predict(), pred[mask == 0] = 0 before projection.
+
+11. Button to clear annotations inside the ROI where the tissue mask says background
+    --> Implemented. "Erase Non-Tissue [E]" button: annotations[roi_mask == 0] = 0.
+
+12. Annotations don't need caching — only the final saved prediction
+    --> Implemented. Only save() persists to disk. No annotation caching.
+        Embeddings are computed per-image on demand.
+
+13. Compute embeddings on demand, with option to load from cache
+    --> Implemented. Embeddings recomputed via state.initialize_predictor()
+        per image load. Cache logic structure is in place (util.get_cache_directory,
+        _compute_data_signature) but currently falls through to fresh compute.
+        The skeleton for a cache-lookup dialog is present (could be uncommented
+        or extended later) — the state mechanism supports it.
+
+14. Load images sequentially, one at a time
+    --> Implemented. Starts at index 0, "Next" advances with wrap-around.
+
+15. Button to switch to next image
+    --> Implemented. "Next [X/Y]" button, text updates with current index.
+
+16. Keep "Train and Predict" as a combined button
+    --> Implemented. Reuses _ClassifierBase._run_train_and_predict() which
+        trains then predicts in one call.
+
+Bug fixes during implementation
+--------------------------------
+
+- Shape mismatch in _train: roi_mask was at full ROI resolution (e.g. 1024×1024
+  = 1M pixels) but labels from accumulate_pixel_labels were already resized
+  down to grid resolution (e.g. 256×256 = 65K pixels). The boolean
+  operation (labels != 0) & (flat_mask == 255) failed with a shape error.
+  Fix: roi_mask is downsampled to grid_shape via skimage.transform.resize
+  before masking.
+
+- Brush size too small: The base _ClassifierBase sets brush_size=3 which is
+  unusable on large ROIs (1024×1024+ px). After layer creation in
+  HistopathologyAnnotator.__init__, brush_size is set proportional to canvas
+  size: max(5, min(roi_size * 0.01, 100)) which gives ~10 px on a 1024²
+  canvas.
