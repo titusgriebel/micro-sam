@@ -35,6 +35,7 @@ pytest
 - `automatic_segmentation.py` - High-level API for automatic segmentation workflows
 - `instance_segmentation.py` - Core automatic segmentation implementations (AMG, AIS, APG)
 - `multi_dimensional_segmentation.py` - 3D volume and temporal tracking segmentation
+- `pixel_classification.py` - Random-forest pixel/object classifiers over per-pixel features (grid-based). Key helpers: `compute_pixel_features`, `_grid_shape`, `accumulate_pixel_labels`, `project_prediction_to_image`, `train_pixel_classifier`
 
 **SAM v2 Support (micro_sam/v2/):**
 - SAM v2 uses Hiera backbone (hvit_t, hvit_s, hvit_b, hvit_l) with temporal/video capabilities
@@ -44,7 +45,7 @@ pytest
 - Model type prefixes: SAM v1 = `vit_*`, SAM v2 = `hvit_*`
 
 **Napari UI (micro_sam/sam_annotator/):**
-- `_annotator.py` - Base annotator with napari layer/widget/keybinding setup
+- `_annotator.py` - Base annotator with napari layer/widget/keybinding setup; also holds `_ClassifierBase`, the base for pixel/object RF-classifier tools (see below)
 - `annotator.py`, `annotator_tracking.py` - UIs for interactive and automatic segmentation / tracking
 - `_state.py` - Singleton state manager (predictor, embeddings, AMG generators)
 - `_widgets.py` - Qt widgets for embedding/segmentation/tracking controls
@@ -100,6 +101,20 @@ All modes support tiling for large images via `inference.batched_tiled_inference
 - `PEFT_Sam` wrapper enables freezing most parameters
 - Strategies: LoRA, FacT, SSF, AdaptFormer, ClassicalSurgery
 - Configured via `models.peft_sam.PEFT_Sam(sam_model, rank=4, peft_module="lora")`
+
+**Pixel/Object RF-Classifier Tools (`_ClassifierBase`):**
+- Base in `sam_annotator/_annotator.py`; subclass a tool by implementing the hooks
+  `_compute_features`, `_compute_training_labels`, `_train`, `_project_prediction`, and
+  optionally overriding `_predict_and_show` / `_update_image` / `_extra_classification_sections`.
+- Configured via class attrs: `rf_attr`, `features_attr`, `aux_attr` (which `AnnotatorState`
+  fields cache the classifier/features/aux), `tool_key`, `max_components`, `supports_apply_to_volume`.
+- Uses two label layers, `annotations` (scribbles) and `prediction`; features are on a coarse
+  grid (`_grid_shape`), predictions projected back with `project_prediction_to_image`.
+- Custom histopathology tool: `scripts/histopathology_classifier.py` — subclasses
+  `_ClassifierBase`, swaps SAM embeddings for **UNI2** (histopathology ViT) features computed over
+  the whole ROI, works on the center 1/9 ROI of padded h5 tiles, and adds `tissue` (editable
+  foreground mask) + `certainty` layers. UNI2 features cover the full ROI regardless of the tissue
+  mask, so mask edits need no feature recompute.
 
 ### Data Flow
 

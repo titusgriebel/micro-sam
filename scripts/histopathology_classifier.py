@@ -53,6 +53,10 @@ CLASS_IDS = {
     6: "background",
 }
 
+# Certainty labels painted on the "certainty" layer. Unpainted (0) = full certainty.
+# Stored as raw ints; how 1/2 weight U-Net training is decided by the training consumer.
+CERTAINTY_IDS = {1: "uncertain", 2: "excluded"}
+
 # Side of the square neighbourhood for the majority (modal) smoothing of the prediction. Set to
 # <= 1 to disable; larger removes more scatter but rounds off fine structures.
 SMOOTHING_SIZE = 3
@@ -368,6 +372,17 @@ class HistopathologySession:
         _, roi_img, roi_msk = self.get_current()
         return roi_img, roi_msk
 
+    def save_roi_mask(self, idx, roi_mask):
+        """Overwrite the center 1/9 of the stored padded mask with the corrected ROI mask.
+
+        Uses the same center slices as ``get_center_roi`` and keeps the stored 0/255 dtype.
+        """
+        h, w = self._image_shape
+        y0, y1 = h // 3, 2 * h // 3
+        x0, x1 = w // 3, 2 * w // 3
+        with h5py.File(self.h5_path, "a") as f:
+            f["masks"][idx, y0:y1, x0:x1] = roi_mask.astype(f["masks"].dtype)
+
     def save_predictions(self, predictions_dict):
         """Save prediction and annotation arrays to the h5 file.
 
@@ -381,8 +396,10 @@ class HistopathologySession:
             for name, data in predictions_dict.items():
                 sub = preds_group.require_group(name)
                 # Delete existing datasets so re-saving an edited image overwrites instead of
-                # raising "name already exists".
-                for key in ("prediction", "annotations"):
+                # raising "name already exists". 'certainty' is included so re-saving an image
+                # whose certainty was cleared drops the stale dataset (it is only recreated below
+                # when non-empty).
+                for key in ("prediction", "annotations", "certainty"):
                     if key in sub:
                         del sub[key]
                 sub.create_dataset(
@@ -395,6 +412,13 @@ class HistopathologySession:
                     data=data["annotations"],
                     dtype="int32",
                 )
+                # Only store the certainty map when something is painted (unpainted 0 = full
+                # certainty everywhere, so an all-zero map is redundant). Raw uint8 ids 1/2.
+                certainty = data.get("certainty")
+                if certainty is not None and np.asarray(certainty).any():
+                    sub.create_dataset(
+                        "certainty", data=certainty, dtype="uint8"
+                    )
                 # Store the ROI's WSI bounding box (parsed from the tile filename) so the prediction
                 # can be placed back into the whole-slide image without re-parsing the name.
                 bbox = _parse_bbox(name)
@@ -403,6 +427,9 @@ class HistopathologySession:
 
             preds_group.attrs["h5_path"] = self.h5_path
             preds_group.attrs["class_ids"] = str(list(CLASS_IDS.items()))
+            preds_group.attrs["certainty_ids"] = str(
+                list(CERTAINTY_IDS.items())
+            )
             # Count actual saved images, not input dict size
             preds_group.attrs["n_saved"] = len(preds_group)
 
@@ -522,6 +549,18 @@ class HistopathologyAnnotator(_ClassifierBase):
             grid_shape,
         )
 
+    def _tissue_mask(self):
+        """Return the current full-ROI foreground mask (0/255 uint8).
+
+        Reads the editable 'tissue' layer when present (so manual include/exclude edits take
+        effect), else falls back to the mask loaded from the h5 file.
+        """
+        if "tissue" in self._viewer.layers:
+            return np.where(
+                self._viewer.layers["tissue"].data > 0, 255, 0
+            ).astype("uint8")
+        return self._session.roi_mask
+
     def _train(
         self,
         features,
@@ -540,7 +579,7 @@ class HistopathologyAnnotator(_ClassifierBase):
         if grid_shape is None:
             return None
         roi_mask_grid = sk_resize(
-            self._session.roi_mask,
+            self._tissue_mask(),
             grid_shape,
             order=0,
             anti_aliasing=False,
@@ -603,7 +642,7 @@ class HistopathologyAnnotator(_ClassifierBase):
         prediction = self._project_prediction(pred, aux)
         if prediction is None:
             return None
-        prediction[self._session.roi_mask == 0] = 0
+        prediction[self._tissue_mask() == 0] = 0
         layer = self._viewer.layers["prediction"]
         layer.data = prediction
         self._refresh_label_widget()
@@ -640,14 +679,43 @@ class HistopathologyAnnotator(_ClassifierBase):
         self._viewer.layers["prediction"].data = np.zeros(
             roi_shape, dtype="uint32"
         )
+        # The certainty layer marks regions of uncertain (1) or excluded (2) labels for the U-Net
+        # training consumer; base '_require_layers' only makes annotations/prediction, so create it
+        # here. Unpainted (0) = full certainty, so an untouched layer needs no storage (see _do_save).
+        if "certainty" not in self._viewer.layers:
+            certainty_layer = self._viewer.add_labels(
+                np.zeros(roi_shape, dtype="uint8"), name="certainty"
+            )
+            # Match the annotations brush so painting is usable on large ROIs (napari's default is
+            # a few px); the base sets a proportional brush there in __init__.
+            if "annotations" in self._viewer.layers:
+                certainty_layer.brush_size = self._viewer.layers[
+                    "annotations"
+                ].brush_size
+        else:
+            self._viewer.layers["certainty"].data = np.zeros(
+                roi_shape, dtype="uint8"
+            )
+        # The tissue layer exposes the (editable) foreground mask as binary 1/0: paint to include a
+        # region, erase to exclude it. It is the source of truth for _tissue_mask(); UNI2 features
+        # cover the whole ROI, so including a previously-masked region needs no recompute.
+        tissue = (self._session.roi_mask == 255).astype("uint8")
+        if "tissue" not in self._viewer.layers:
+            tissue_layer = self._viewer.add_labels(tissue, name="tissue")
+            tissue_layer.selected_label = 1
+            if "annotations" in self._viewer.layers:
+                tissue_layer.brush_size = self._viewer.layers[
+                    "annotations"
+                ].brush_size
+        else:
+            self._viewer.layers["tissue"].data = tissue
         # The label layers are ROI-sized; translate them to the ROI position so scribbles and
         # predictions overlay the center of the full "context" image displayed behind them.
         offset = self._session.roi_offset
-        self._viewer.layers["annotations"].translate = offset
-        self._viewer.layers["prediction"].translate = offset
-        if scale is not None:
-            self._viewer.layers["annotations"].scale = scale
-            self._viewer.layers["prediction"].scale = scale
+        for name in ("annotations", "prediction", "certainty", "tissue"):
+            self._viewer.layers[name].translate = offset
+            if scale is not None:
+                self._viewer.layers[name].scale = scale
 
     # ----------------------------------------------------------
     # Widgets
@@ -706,6 +774,40 @@ class HistopathologyAnnotator(_ClassifierBase):
                 self._viewer.layers[name].selected_label = label_id
                 self._viewer.layers[name].mode = "paint"
 
+    def _create_certainty_id_widget(self):
+        """Create a separate row of buttons for painting the certainty layer."""
+        group = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+
+        title = QtWidgets.QLabel("Certainty Buttons")
+        title.setToolTip(
+            "Mark regions where the label is uncertain or should be excluded"
+        )
+        layout.addWidget(title)
+
+        grid = QtWidgets.QGridLayout()
+        grid.setSpacing(4)
+        for col, (cid, cname) in enumerate(sorted(CERTAINTY_IDS.items())):
+            btn = QtWidgets.QPushButton(f"{cid}: {cname}")
+            btn.setToolTip(
+                f"Paint certainty {cid} ({cname}) on the certainty layer"
+            )
+            btn.clicked.connect(
+                lambda checked, c=cid: self._set_certainty_label(c)
+            )
+            grid.addWidget(btn, 0, col)
+
+        layout.addLayout(grid)
+        group.setLayout(layout)
+        return group
+
+    def _set_certainty_label(self, label_id):
+        if "certainty" in self._viewer.layers:
+            layer = self._viewer.layers["certainty"]
+            layer.selected_label = label_id
+            layer.mode = "paint"
+            self._viewer.layers.selection.active = layer
+
     def _create_erase_non_tissue_widget(self):
         """Create the erase non-tissue button."""
         btn = QtWidgets.QPushButton("Erase Non-Tissue [E]")
@@ -720,7 +822,7 @@ class HistopathologyAnnotator(_ClassifierBase):
 
     def _erase_non_tissue(self):
         """Set both the annotation and prediction layers to 0 where the tissue mask is 0."""
-        roi_mask = self._session.roi_mask
+        roi_mask = self._tissue_mask()
         cleared = False
         for name in ("annotations", "prediction"):
             if name not in self._viewer.layers:
@@ -836,14 +938,31 @@ class HistopathologyAnnotator(_ClassifierBase):
             widgets._generate_message("error", "No annotations layer found.")
             return
 
-        pred = self._viewer.layers["prediction"].data
+        # Re-mask the prediction with the (possibly edited) tissue mask so post-predict include/
+        # exclude edits are reflected and only foreground pixels end up in the saved label.
+        mask = self._tissue_mask()
+        pred = self._viewer.layers["prediction"].data.copy()
+        pred[mask == 0] = 0
         ann = self._viewer.layers["annotations"].data
+        certainty = (
+            self._viewer.layers["certainty"].data
+            if "certainty" in self._viewer.layers
+            else None
+        )
         name = state.image_name or str(self._session.current_idx)
+
+        # Persist the corrected foreground mask: overwrite the stored mask and keep it in memory.
+        self._session.roi_mask = mask
+        self._session.save_roi_mask(self._session.current_idx, mask)
 
         # Build predictions dict for batch saving.
         self._session.save_predictions(
             {
-                name: {"prediction": pred, "annotations": ann},
+                name: {
+                    "prediction": pred,
+                    "annotations": ann,
+                    "certainty": certainty,
+                },
             }
         )
         # The annotation for this image is done, so drop its cached features to reclaim h5 space.
@@ -864,6 +983,7 @@ class HistopathologyAnnotator(_ClassifierBase):
         widget_list = [
             self._create_status_widget(),
             self._create_class_id_widget(),
+            self._create_certainty_id_widget(),
             self._create_erase_non_tissue_widget(),
             self._create_next_image_widget(),
             self._create_save_widget(),
