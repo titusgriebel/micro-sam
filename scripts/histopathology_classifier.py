@@ -468,6 +468,25 @@ class HistopathologySession:
             if UNI_CACHE_GROUP in f:
                 del f[UNI_CACHE_GROUP]
 
+    def load_prediction(self, name):
+        """Return saved {prediction, annotations, certainty} for an image, or None if not saved."""
+        with h5py.File(self.h5_path, "r") as f:
+            grp = f.get("predictions")
+            if grp is None or name not in grp:
+                return None
+            sub = grp[name]
+            if "prediction" not in sub:
+                return None
+            return {
+                "prediction": np.asarray(sub["prediction"]),
+                "annotations": np.asarray(sub["annotations"])
+                if "annotations" in sub
+                else None,
+                "certainty": np.asarray(sub["certainty"])
+                if "certainty" in sub
+                else None,
+            }
+
     def saved_names(self):
         """Return the set of image names that already have a saved prediction."""
         with h5py.File(self.h5_path, "r") as f:
@@ -717,6 +736,33 @@ class HistopathologyAnnotator(_ClassifierBase):
             if scale is not None:
                 self._viewer.layers[name].scale = scale
 
+        self._reorder_layers()
+
+    def _reorder_layers(self):
+        """Enforce a stable stacking so switching images doesn't bury the label layers.
+
+        Re-adding 'context'/'image' on load pushes them to the top of the stack, hiding the
+        tissue mask and prediction; this restores a fixed bottom→top order (labels on top) and
+        keeps 'annotations' the active layer for painting.
+        """
+        order = [
+            "context",
+            "image",
+            "roi border",
+            "tissue",
+            "certainty",
+            "prediction",
+            "annotations",
+        ]
+        for name in order:
+            if name in self._viewer.layers:
+                idx = self._viewer.layers.index(name)
+                self._viewer.layers.move(idx, len(self._viewer.layers))
+        if "annotations" in self._viewer.layers:
+            self._viewer.layers.selection.active = self._viewer.layers[
+                "annotations"
+            ]
+
     # ----------------------------------------------------------
     # Widgets
     # ----------------------------------------------------------
@@ -842,6 +888,13 @@ class HistopathologyAnnotator(_ClassifierBase):
                 "error", "No annotation or prediction layer found."
             )
 
+    def _create_previous_image_widget(self):
+        """Create the previous image button."""
+        btn = QtWidgets.QPushButton("Previous")
+        btn.setToolTip("Load the previous image tile from the h5 file")
+        btn.clicked.connect(self._previous_image)
+        return btn
+
     def _create_next_image_widget(self):
         """Create the next image button."""
         btn = QtWidgets.QPushButton(
@@ -852,19 +905,25 @@ class HistopathologyAnnotator(_ClassifierBase):
         self._next_button = btn
         return btn
 
-    def _next_image(self):
-        """Advance to the next image in the session."""
+    def _step_image(self, delta):
+        """Move `delta` images through the session (wrapping) and load the result."""
         state = AnnotatorState()
         state.skip_recomputing_embeddings = False
         state.pixel_features = None
         self._invalidate_features()
 
-        idx = self._session.current_idx + 1
-        if idx >= self._session.n_images:
-            idx = 0  # wrap around
-        self._session.current_idx = idx
-
+        self._session.current_idx = (
+            self._session.current_idx + delta
+        ) % self._session.n_images
         self._load_current_image()
+
+    def _next_image(self):
+        """Advance to the next image in the session."""
+        self._step_image(1)
+
+    def _previous_image(self):
+        """Go back to the previous image in the session."""
+        self._step_image(-1)
 
     def _load_current_image(self):
         """Load the current ROI and set up napari layers."""
@@ -910,6 +969,42 @@ class HistopathologyAnnotator(_ClassifierBase):
         # Refresh label widget and the saved/progress indicator.
         self._refresh_label_widget()
         self._update_status()
+
+    def _create_load_prediction_widget(self):
+        """Button to load a previously saved prediction for this image (hidden if none exists)."""
+        btn = QtWidgets.QPushButton("Load Saved Prediction")
+        btn.setToolTip(
+            "Load the prediction/annotations saved earlier for this image from the h5 file"
+        )
+        btn.clicked.connect(self._load_prediction)
+        self._load_button = btn
+        return btn
+
+    def _load_prediction(self):
+        """Restore the saved prediction/annotations/certainty for the current image."""
+        state = AnnotatorState()
+        name = state.image_name or str(self._session.current_idx)
+        data = self._session.load_prediction(name)
+        if data is None:
+            widgets._generate_message(
+                "error", f"No saved prediction found for '{name}'."
+            )
+            return
+        self._require_layers()
+        self._viewer.layers["prediction"].data = data["prediction"].astype(
+            "uint32"
+        )
+        if data["annotations"] is not None:
+            self._viewer.layers["annotations"].data = data[
+                "annotations"
+            ].astype("uint32")
+        if data["certainty"] is not None and "certainty" in self._viewer.layers:
+            self._viewer.layers["certainty"].data = data["certainty"].astype(
+                "uint8"
+            )
+        self._reorder_layers()
+        self._refresh_label_widget()
+        show_info(f"Loaded saved prediction for '{name}'.")
 
     def _create_save_widget(self):
         """Create the save prediction button."""
@@ -985,7 +1080,9 @@ class HistopathologyAnnotator(_ClassifierBase):
             self._create_class_id_widget(),
             self._create_certainty_id_widget(),
             self._create_erase_non_tissue_widget(),
+            self._create_previous_image_widget(),
             self._create_next_image_widget(),
+            self._create_load_prediction_widget(),
             self._create_save_widget(),
             self._create_close_series_widget(),
         ]
@@ -1021,6 +1118,10 @@ class HistopathologyAnnotator(_ClassifierBase):
             "padding:4px; border:1px solid #888;"
             + (" background-color:#2a7d4f; color:white;" if done else "")
         )
+        # Only show "Load Saved Prediction" when this image actually has one cached.
+        load_btn = getattr(self, "_load_button", None)
+        if load_btn is not None:
+            load_btn.setVisible(session.has_prediction(name))
 
     def _create_close_series_widget(self):
         """Button to delete this h5's cached embeddings and move on to the next h5 file."""
@@ -1076,6 +1177,7 @@ class HistopathologyAnnotator(_ClassifierBase):
         # self._session to be available.
         self._session = session
         self._next_button = None
+        self._load_button = None
         super().__init__(viewer)
 
         # Load UNI2 once; its features drive the pixel classifier (computed lazily in
@@ -1098,6 +1200,9 @@ class HistopathologyAnnotator(_ClassifierBase):
             self._viewer.layers["annotations"].brush_size = max(
                 5, min(int(min_side * 0.01), 100)
             )
+
+        # Now that all widgets exist, set the first image's load-button visibility.
+        self._update_status()
 
 
 # ---------------------------------------------------------------------------
