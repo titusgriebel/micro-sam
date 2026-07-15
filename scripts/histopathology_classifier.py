@@ -12,6 +12,9 @@ Usage::
 
 import os.path
 import re
+import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 import h5py
@@ -21,12 +24,15 @@ import timm
 import torch
 import torch.nn.functional as F
 from bioimage_cpp.utils import Blocking
+from matplotlib.colors import to_rgba
+from napari.utils.colormaps import DirectLabelColormap
 from napari.utils.notifications import show_info
 from qtpy import QtWidgets
 from skimage.filters.rank import modal
 from skimage.morphology import footprint_rectangle
 from skimage.transform import resize as sk_resize
 from torchvision import transforms
+from tqdm import tqdm
 
 from micro_sam import util
 from micro_sam.pixel_classification import (
@@ -42,16 +48,105 @@ from micro_sam.sam_annotator._annotator import _ClassifierBase
 from micro_sam.sam_annotator._state import AnnotatorState
 
 # ---------------------------------------------------------------------------
+# Storage / sync configuration.
+# ---------------------------------------------------------------------------
+# Annotations are written to a small per-input sidecar ('<stem>.annot.h5'), never into the (large,
+# reproducible) input h5 — so the input can live read-only on an external HDD while only the tiny
+# sidecar is backed up. Keep the sidecar dir on the internal SSD (fast + safe). None -> next to input.
+ANNOT_OUTPUT_DIR = "/Users/titus/growth_pattern_annotations"
+# Dir for the large UNI2 feature cache (~up to 200 MB/tile). Never synced. None -> system temp.
+# On the Transcend (1.5 TB free) next to the inputs so precomputed embeddings persist across reboots.
+UNI_CACHE_DIR = "/Volumes/Transcend/growth_patterns/uni_cache"
+# Shell script that pushes a finished sidecar to the HPC + HDD (edit its dest paths). Run per case.
+SYNC_SCRIPT = Path(__file__).parent / "sync_case.sh"
+# Folder of input h5s that `--precompute` (with no path arg) computes + caches embeddings for.
+PRECOMPUTE_DIR = "/Volumes/Transcend/growth_patterns/annotation_h5"
+
+# ---------------------------------------------------------------------------
 # Class definitions – hardcoded as requested.
 # ---------------------------------------------------------------------------
+IGNORE_INDEX = 255  # 'excluded' tier — masked from ALL downstream use
+TRUST_DEFAULT = 0
+TRUST_REDUCED = (
+    1  # low-confidence OR analysable-degraded (merged), on a real class
+)
 
 CLASS_IDS = {
-    2: "tumor",
-    3: "stroma",
-    4: "necrosis",
-    5: "lymphocyte",
-    6: "background",
+    0: "background_glass",  # NON-TISSUE only: glass, empty space, alveolar air
+    1: "stroma",  # reactive/desmoplastic stroma BETWEEN tumour structures
+    2: "healthy_alveolar",
+    3: "necrosis",
+    4: "mucin_pool",  # route-out
+    5: "mucinous_epithelium",  # route-out (cytology overrides architecture)
+    6: "lepidic",  # ── growth patterns ──
+    7: "acinar",
+    8: "papillary",
+    9: "micropapillary",  # overrides co-resident patterns within a shared airspace
+    10: "complex_glandular",  # cribriform AND fused glands
+    11: "solid",
+    12: "cartilage",
+    13: "blood_vessel",
+    14: "bronchial_epithelium",
+    15: "benign_glands",  # ACINAR mimic — verify, never merge into a pattern class
+    16: "alveolar_macrophages",  # MICROPAPILLARY mimic — verify, never merge
+    17: "tissue_other",  # FOREGROUND catch-all: pleura, free blood, pigment
 }
+
+PATTERN_CLASSES = (
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+)  # metadata for downstream consumers — not computed here
+HIGH_GRADE = (9, 10, 11)
+ROUTE_OUT = (4, 5)
+BENIGN_STRUCT = (12, 13, 14, 15, 16)
+NON_TISSUE = (0,)  # aligns with the foreground mask
+TISSUE_CLASSES = tuple(c for c in CLASS_IDS if c != 0)
+
+COLLAPSE_TO_TISSUE_OTHER = {12: 17, 13: 17}  # cartilage, vessel — safe
+# 14, 15, 16 → verify against their mimicked pattern class before any collapse (C8)
+# nothing ever collapses into 0 — background_glass is non-tissue only (C14)
+# Fixed, high-contrast palette (Trubetskoy's "20 distinct colors") so every class id always renders
+# in a well-separable color on the annotations/prediction layers instead of napari's hashed default.
+# Colors are assigned to ids in sorted order, so the mapping stays stable if CLASS_IDS changes.
+CLASS_PALETTE = {
+    # ── non-tissue / neutral: desaturated, recedes ──
+    0: "#ffffff",  # background_glass    — white = glass. Literal, and it disappears.
+    17: "#c8c8c8",  # tissue_other        — neutral grey, clearly "tissue, unclassified"
+    1: "#e0d4c8",  # stroma              — warm pale tan (abundant; must not shout)
+    2: "#dfeaf2",  # healthy_alveolar    — pale blue-grey
+    3: "#5a5a5a",  # necrosis            — dark grey
+    # ── mucinous route-out: TEAL family (one hue, two lightnesses) ──
+    4: "#7fd4cd",  # mucin_pool          — light teal
+    5: "#128f86",  # mucinous_epithelium — dark teal
+    # ── growth patterns: RED→ORANGE→YELLOW ramp, low→high grade ──
+    6: "#fee08b",  # lepidic             — pale yellow  (low grade)
+    7: "#fdae61",  # acinar              — orange
+    8: "#f46d43",  # papillary           — deep orange
+    9: "#d73027",  # micropapillary      — red         (high grade)
+    10: "#a50026",  # complex_glandular   — dark red    (high grade)
+    11: "#67001f",  # solid               — maroon      (high grade)
+    # ── benign structures: PURPLE / BLUE family ──
+    12: "#c6a5d8",  # cartilage           — light purple
+    13: "#7b4fa3",  # blood_vessel        — purple
+    14: "#4a6fd4",  # bronchial_epithelium— blue
+    15: "#8c3f8c",  # benign_glands       — magenta-purple
+    16: "#b07aa1",  # alveolar_macrophages— dusty mauve
+}
+
+IGNORE_COLOR = (
+    "#000000"  # or render as transparent/hatched — NOT a class color
+)
+
+
+def _class_color(class_id):
+    """Hex color pinned to a class id (by its sorted position in CLASS_IDS)."""
+    order = sorted(CLASS_IDS)
+    return CLASS_PALETTE[order.index(class_id) % len(CLASS_PALETTE)]
+
 
 # Certainty labels painted on the "certainty" layer. Unpainted (0) = full certainty.
 # Stored as raw ints; how 1/2 weight U-Net training is decided by the training consumer.
@@ -59,7 +154,7 @@ CERTAINTY_IDS = {1: "uncertain", 2: "excluded"}
 
 # Side of the square neighbourhood for the majority (modal) smoothing of the prediction. Set to
 # <= 1 to disable; larger removes more scatter but rounds off fine structures.
-SMOOTHING_SIZE = 3
+SMOOTHING_SIZE = 5
 
 
 def _smooth_grid_prediction(pred, grid_shape):
@@ -340,6 +435,19 @@ class HistopathologySession:
         self.current_idx = 0
         self.roi_mask = None  # set when an image is loaded
 
+        # Sidecar output (annotations only) and scratch feature cache — never written into the input.
+        in_path = Path(self.h5_path)
+        out_dir = (
+            Path(ANNOT_OUTPUT_DIR) if ANNOT_OUTPUT_DIR else in_path.parent
+        )
+        self.out_path = str(out_dir / f"{in_path.stem}.annot.h5")
+        cache_dir = (
+            Path(UNI_CACHE_DIR)
+            if UNI_CACHE_DIR
+            else Path(tempfile.gettempdir())
+        )
+        self.cache_path = str(cache_dir / f"{in_path.stem}.unicache.h5")
+
     @property
     def image_shape(self):
         """(max_h, max_w) of the padded storage."""
@@ -358,10 +466,19 @@ class HistopathologySession:
         return (h // 3, w // 3)
 
     def get_current(self):
-        """Return (full_image, image_roi, mask_roi) for the current index."""
+        """Return (full_image, image_roi, mask_roi) for the current index.
+
+        The stored tissue mask is bit-packed along its width (``(H, W/8)`` uint8, 8 px per byte), so
+        it is unpacked back to a full ``(H, W)`` 0/255 mask before the ROI is cropped. Any already
+        full-width mask passes through and is just binarised to 0/255.
+        """
         with h5py.File(self.h5_path, "r") as f:
             img = np.asarray(f["images"][self.current_idx])
             msk = np.asarray(f["masks"][self.current_idx])
+        h, w = self._image_shape
+        if msk.shape[-1] * 8 == w:  # bit-packed foreground mask -> unpack to (H, W)
+            msk = np.unpackbits(msk, axis=-1)[..., :w]
+        msk = np.where(msk > 0, 255, 0).astype("uint8")
         roi_img, roi_msk = self.get_center_roi(
             img, msk, self._image_shape[0], self._image_shape[1]
         )
@@ -372,70 +489,77 @@ class HistopathologySession:
         _, roi_img, roi_msk = self.get_current()
         return roi_img, roi_msk
 
-    def save_roi_mask(self, idx, roi_mask):
-        """Overwrite the center 1/9 of the stored padded mask with the corrected ROI mask.
-
-        Uses the same center slices as ``get_center_roi`` and keeps the stored 0/255 dtype.
-        """
-        h, w = self._image_shape
-        y0, y1 = h // 3, 2 * h // 3
-        x0, x1 = w // 3, 2 * w // 3
-        with h5py.File(self.h5_path, "a") as f:
-            f["masks"][idx, y0:y1, x0:x1] = roi_mask.astype(f["masks"].dtype)
-
     def save_predictions(self, predictions_dict):
-        """Save prediction and annotation arrays to the h5 file.
+        """Save annotation masks (+ reconstruction geometry) into the sidecar output h5.
+
+        The input h5 is never written; only the small ``<stem>.annot.h5`` sidecar is, so the input can
+        stay read-only and only a few-MB file needs backing up. Label maps are stored as gzipped uint8
+        (class ids <= 15, certainty <= 2).
 
         Args:
-            predictions_dict: dict mapping image name ->
-                {"prediction": np.ndarray, "annotations": np.ndarray}
+            predictions_dict: image name -> {"prediction", "annotations", "certainty", "tissue_mask"}.
         """
-        with h5py.File(self.h5_path, "a") as f:
+        Path(self.out_path).parent.mkdir(parents=True, exist_ok=True)
+        with h5py.File(self.out_path, "a") as f:
             preds_group = f.require_group("predictions")
 
             for name, data in predictions_dict.items():
                 sub = preds_group.require_group(name)
-                # Delete existing datasets so re-saving an edited image overwrites instead of
-                # raising "name already exists". 'certainty' is included so re-saving an image
-                # whose certainty was cleared drops the stale dataset (it is only recreated below
-                # when non-empty).
-                for key in ("prediction", "annotations", "certainty"):
+                # Delete existing datasets so re-saving an edited image overwrites instead of raising
+                # "name already exists"; 'certainty'/'tissue_mask' included so a cleared map drops.
+                for key in (
+                    "prediction",
+                    "annotations",
+                    "certainty",
+                    "tissue_mask",
+                ):
                     if key in sub:
                         del sub[key]
                 sub.create_dataset(
                     "prediction",
-                    data=data["prediction"],
-                    dtype="int32",
+                    data=np.asarray(data["prediction"], dtype="uint8"),
+                    compression="gzip",
                 )
                 sub.create_dataset(
                     "annotations",
-                    data=data["annotations"],
-                    dtype="int32",
+                    data=np.asarray(data["annotations"], dtype="uint8"),
+                    compression="gzip",
                 )
-                # Only store the certainty map when something is painted (unpainted 0 = full
-                # certainty everywhere, so an all-zero map is redundant). Raw uint8 ids 1/2.
+                # Only store the certainty map when something is painted (unpainted 0 = full certainty
+                # everywhere, so an all-zero map is redundant). Raw uint8 ids 1/2.
                 certainty = data.get("certainty")
                 if certainty is not None and np.asarray(certainty).any():
                     sub.create_dataset(
-                        "certainty", data=certainty, dtype="uint8"
+                        "certainty",
+                        data=np.asarray(certainty, dtype="uint8"),
+                        compression="gzip",
                     )
-                # Store the ROI's WSI bounding box (parsed from the tile filename) so the prediction
-                # can be placed back into the whole-slide image without re-parsing the name.
+                # The corrected foreground mask (was written back into the input 'masks' dataset).
+                mask = data.get("tissue_mask")
+                if mask is not None:
+                    sub.create_dataset(
+                        "tissue_mask",
+                        data=np.asarray(mask, dtype="uint8"),
+                        compression="gzip",
+                    )
+                # Geometry to place the ROI back into the WSI without re-parsing anything: the tile's
+                # WSI bbox (from the filename) plus the ROI's offset/shape inside the padded tile.
                 bbox = _parse_bbox(name)
                 if bbox is not None:
                     sub.attrs.update(bbox)
+                sub.attrs["roi_offset"] = list(self.roi_offset)
+                sub.attrs["roi_shape"] = list(self.roi_shape)
 
-            preds_group.attrs["h5_path"] = self.h5_path
-            preds_group.attrs["class_ids"] = str(list(CLASS_IDS.items()))
-            preds_group.attrs["certainty_ids"] = str(
-                list(CERTAINTY_IDS.items())
-            )
-            # Count actual saved images, not input dict size
+            f.attrs["input_h5"] = os.path.basename(self.h5_path)
+            f.attrs["image_shape"] = list(self._image_shape)
+            f.attrs["class_ids"] = str(list(CLASS_IDS.items()))
+            f.attrs["certainty_ids"] = str(list(CERTAINTY_IDS.items()))
             preds_group.attrs["n_saved"] = len(preds_group)
 
     def save_cached_features(self, name, features, grid_shape):
-        """Cache UNI2 features for one image in the h5 file (float16 to halve the footprint)."""
-        with h5py.File(self.h5_path, "a") as f:
+        """Cache UNI2 features for one image in the scratch cache file (float16, never synced)."""
+        Path(self.cache_path).parent.mkdir(parents=True, exist_ok=True)
+        with h5py.File(self.cache_path, "a") as f:
             grp = f.require_group(UNI_CACHE_GROUP)
             if name in grp:
                 del grp[name]
@@ -446,7 +570,9 @@ class HistopathologySession:
 
     def load_cached_features(self, name):
         """Return cached (features float32, grid_shape) for an image, or None if not cached."""
-        with h5py.File(self.h5_path, "r") as f:
+        if not os.path.exists(self.cache_path):
+            return None
+        with h5py.File(self.cache_path, "r") as f:
             grp = f.get(UNI_CACHE_GROUP)
             if grp is None or name not in grp:
                 return None
@@ -455,22 +581,32 @@ class HistopathologySession:
                 int(v) for v in ds.attrs["grid_shape"]
             )
 
-    def delete_cached_features(self, name):
-        """Drop an image's cached features (called once its prediction has been saved)."""
-        with h5py.File(self.h5_path, "a") as f:
-            grp = f.get(UNI_CACHE_GROUP)
-            if grp is not None and name in grp:
-                del grp[name]
+    def has_cached_features(self, name):
+        """Whether complete features for ``name`` are cached — a cheap metadata-only check.
 
-    def delete_all_cached_features(self):
-        """Drop every cached feature array (called when closing the series)."""
-        with h5py.File(self.h5_path, "a") as f:
-            if UNI_CACHE_GROUP in f:
-                del f[UNI_CACHE_GROUP]
+        Only reads the h5 directory/attrs, never the ~200 MB feature array (unlike
+        ``load_cached_features``), so ``--precompute`` resume skips already-done tiles instantly
+        instead of dragging every cached file back off the HDD. A partially written entry (dataset
+        present but no ``grid_shape`` attr) or an unreadable/corrupt cache counts as "not cached",
+        so it is recomputed rather than crashing a later load.
+        """
+        if not os.path.exists(self.cache_path):
+            return False
+        try:
+            with h5py.File(self.cache_path, "r") as f:
+                grp = f.get(UNI_CACHE_GROUP)
+                if grp is None:
+                    return False
+                ds = grp.get(name)
+                return ds is not None and "grid_shape" in ds.attrs
+        except OSError:
+            return False
 
     def load_prediction(self, name):
         """Return saved {prediction, annotations, certainty} for an image, or None if not saved."""
-        with h5py.File(self.h5_path, "r") as f:
+        if not os.path.exists(self.out_path):
+            return None
+        with h5py.File(self.out_path, "r") as f:
             grp = f.get("predictions")
             if grp is None or name not in grp:
                 return None
@@ -487,9 +623,25 @@ class HistopathologySession:
                 else None,
             }
 
+    def load_saved_mask(self, name):
+        """Return the corrected tissue mask (0/255 uint8) saved for an image, or None."""
+        if not os.path.exists(self.out_path):
+            return None
+        with h5py.File(self.out_path, "r") as f:
+            grp = f.get("predictions")
+            if (
+                grp is None
+                or name not in grp
+                or "tissue_mask" not in grp[name]
+            ):
+                return None
+            return np.asarray(grp[name]["tissue_mask"], dtype="uint8")
+
     def saved_names(self):
         """Return the set of image names that already have a saved prediction."""
-        with h5py.File(self.h5_path, "r") as f:
+        if not os.path.exists(self.out_path):
+            return set()
+        with h5py.File(self.out_path, "r") as f:
             grp = f.get("predictions")
             return set(grp.keys()) if grp is not None else set()
 
@@ -500,6 +652,35 @@ class HistopathologySession:
     def n_saved(self):
         """Number of the session's images that have a saved prediction."""
         return len(self.saved_names() & set(self._names))
+
+    def set_review(self, name, value):
+        """Flag/unflag a tile for review in the sidecar (removable: ``value=False`` deletes the flag).
+
+        Stored as an attribute on a dedicated ``review`` group, independent of whether the tile has
+        a saved prediction, so it can be toggled at any time. Setting False when no sidecar exists is
+        a no-op (nothing to clear).
+        """
+        if not value and not os.path.exists(self.out_path):
+            return
+        Path(self.out_path).parent.mkdir(parents=True, exist_ok=True)
+        with h5py.File(self.out_path, "a") as f:
+            grp = f.require_group("review")
+            if value:
+                grp.attrs[name] = True
+            elif name in grp.attrs:
+                del grp.attrs[name]
+
+    def get_review(self, name):
+        """Whether the given tile is currently flagged for review."""
+        if not os.path.exists(self.out_path):
+            return False
+        with h5py.File(self.out_path, "r") as f:
+            grp = f.get("review")
+            return bool(
+                grp is not None
+                and name in grp.attrs
+                and grp.attrs[name]
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -670,6 +851,20 @@ class HistopathologyAnnotator(_ClassifierBase):
     # Override: _update_image – work in ROI coordinate space.
     # ----------------------------------------------------------
 
+    def _apply_class_colormap(self):
+        """Pin each class id to its fixed CLASS_PALETTE color on the annotations/prediction layers.
+
+        napari keeps a set colormap across '.data' resets, so this only needs to run when the layers
+        are (re)created; '_update_image' is the funnel all load paths route through.
+        """
+        color_dict = {cid: to_rgba(_class_color(cid)) for cid in CLASS_IDS}
+        color_dict[0] = (0.0, 0.0, 0.0, 0.0)  # background: transparent
+        color_dict[None] = (0.5, 0.5, 0.5, 1.0)  # fallback for any unlisted id
+        cmap = DirectLabelColormap(color_dict=color_dict)
+        for name in ("annotations", "prediction"):
+            if name in self._viewer.layers:
+                self._viewer.layers[name].colormap = cmap
+
     def _update_image(self, segmentation_result=None):
         state = AnnotatorState()
         if state.skip_recomputing_embeddings:
@@ -686,6 +881,7 @@ class HistopathologyAnnotator(_ClassifierBase):
 
         self._invalidate_features()
         self._require_layers()
+        self._apply_class_colormap()
         scale = (
             None
             if state.image_scale is None
@@ -784,15 +980,9 @@ class HistopathologyAnnotator(_ClassifierBase):
             btn = QtWidgets.QPushButton(f"ID {class_id}: {class_name}")
             btn.setAutoExclusive(False)
 
-            color = "#cccccc"
-            try:
-                ann_layer = self._viewer.layers["annotations"]
-                c = ann_layer.get_color(class_id)
-                r, g, b = (int(round(255 * ch)) for ch in c[:3])
-                color = f"rgb({r}, {g}, {b})"
-            except (KeyError, IndexError, AttributeError):
-                # Annotations layer may not exist during widget creation.
-                pass
+            # Read from CLASS_PALETTE directly (not the layer) so buttons match the fixed layer
+            # colors even though they are built before the first _apply_class_colormap.
+            color = _class_color(class_id)
             btn.setStyleSheet(
                 f"background-color: {color}; border: 1px solid #888; "
                 f"padding: 4px; text-align: left;"
@@ -929,7 +1119,15 @@ class HistopathologyAnnotator(_ClassifierBase):
         """Load the current ROI and set up napari layers."""
         session = self._session
         full_image, image, mask = session.get_current()
-        session.roi_mask = mask
+        # Prefer a previously saved corrected mask (input is read-only, so edits live in the sidecar).
+        saved_mask = session.load_saved_mask(
+            session._names[session.current_idx]
+        )
+        session.roi_mask = (
+            saved_mask
+            if saved_mask is not None and saved_mask.shape == mask.shape
+            else mask
+        )
 
         state = AnnotatorState()
         roi_shape = session.roi_shape
@@ -966,9 +1164,38 @@ class HistopathologyAnnotator(_ClassifierBase):
             f"Next [{session.current_idx + 1}/{session.n_images}]"
         )
 
-        # Refresh label widget and the saved/progress indicator.
+        # Refresh label widget, the saved/progress indicator, and this tile's review flag.
         self._refresh_label_widget()
         self._update_status()
+        self._refresh_review_checkbox()
+
+    def _create_review_widget(self):
+        """Checkbox flagging the current tile for review; persisted per-tile in the sidecar."""
+        box = QtWidgets.QCheckBox("Mark for review")
+        box.setToolTip(
+            "Flag this tile for later review. Stored per tile in the sidecar and restored when you "
+            "revisit it; uncheck to remove."
+        )
+        box.toggled.connect(self._set_review)
+        self._review_checkbox = box
+        return box
+
+    def _set_review(self, checked):
+        """Persist the review flag for the current tile (called on user toggle)."""
+        state = AnnotatorState()
+        name = state.image_name or str(self._session.current_idx)
+        self._session.set_review(name, bool(checked))
+
+    def _refresh_review_checkbox(self):
+        """Reflect the current tile's stored review flag without firing _set_review."""
+        box = getattr(self, "_review_checkbox", None)
+        if box is None:
+            return
+        state = AnnotatorState()
+        name = state.image_name or str(self._session.current_idx)
+        box.blockSignals(True)
+        box.setChecked(self._session.get_review(name))
+        box.blockSignals(False)
 
     def _create_load_prediction_widget(self):
         """Button to load a previously saved prediction for this image (hidden if none exists)."""
@@ -998,7 +1225,10 @@ class HistopathologyAnnotator(_ClassifierBase):
             self._viewer.layers["annotations"].data = data[
                 "annotations"
             ].astype("uint32")
-        if data["certainty"] is not None and "certainty" in self._viewer.layers:
+        if (
+            data["certainty"] is not None
+            and "certainty" in self._viewer.layers
+        ):
             self._viewer.layers["certainty"].data = data["certainty"].astype(
                 "uint8"
             )
@@ -1046,23 +1276,22 @@ class HistopathologyAnnotator(_ClassifierBase):
         )
         name = state.image_name or str(self._session.current_idx)
 
-        # Persist the corrected foreground mask: overwrite the stored mask and keep it in memory.
+        # Keep the corrected foreground mask in memory; it is persisted in the sidecar below.
         self._session.roi_mask = mask
-        self._session.save_roi_mask(self._session.current_idx, mask)
 
-        # Build predictions dict for batch saving.
+        # Build predictions dict for batch saving (all into the sidecar output h5).
         self._session.save_predictions(
             {
                 name: {
                     "prediction": pred,
                     "annotations": ann,
                     "certainty": certainty,
+                    "tissue_mask": mask,
                 },
             }
         )
-        # The annotation for this image is done, so drop its cached features to reclaim h5 space.
-        # The in-memory features (state.pixel_features) stay until Next, so re-training is instant.
-        self._session.delete_cached_features(name)
+        # Keep the cached UNI2 features (they live on the roomy HDD cache, not the input h5), so
+        # revisiting/re-annotating this image later is instant instead of a ~20s recompute.
         self._update_status()
         show_info(
             f"Saved prediction and annotations for '{name}' to "
@@ -1082,6 +1311,7 @@ class HistopathologyAnnotator(_ClassifierBase):
             self._create_erase_non_tissue_widget(),
             self._create_previous_image_widget(),
             self._create_next_image_widget(),
+            self._create_review_widget(),
             self._create_load_prediction_widget(),
             self._create_save_widget(),
             self._create_close_series_widget(),
@@ -1123,6 +1353,29 @@ class HistopathologyAnnotator(_ClassifierBase):
         if load_btn is not None:
             load_btn.setVisible(session.has_prediction(name))
 
+    def _sync_case(self, out_path):
+        """Push a finished sidecar to HPC + HDD in the background via sync_case.sh (fire-and-forget).
+
+        The sidecar is a few MB, so this rarely takes long, but running it detached keeps napari
+        responsive and avoids Qt-thread issues. Output is captured to a per-case log next to the
+        sidecar; the script self-verifies the HPC copy and skips gracefully if dests are unset.
+        """
+        if not os.path.exists(out_path):
+            return  # nothing was saved for this case
+        log_dir = Path(out_path).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        log_path = log_dir / f"sync_{Path(out_path).stem}_{ts}.log"
+        log = open(log_path, "w")
+        subprocess.Popen(
+            ["bash", str(SYNC_SCRIPT), out_path],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+        show_info(
+            f"Syncing {Path(out_path).name} in background — log: {log_path}"
+        )
+
     def _create_close_series_widget(self):
         """Button to delete this h5's cached embeddings and move on to the next h5 file."""
         btn = QtWidgets.QPushButton("Close Series")
@@ -1139,13 +1392,14 @@ class HistopathologyAnnotator(_ClassifierBase):
         reply = QtWidgets.QMessageBox.question(
             self,
             "Close series",
-            f"Close this series? {n_saved}/{total} images saved.\n"
-            "The cached UNI2 embeddings for this h5 file will be deleted.",
+            f"Close this series? {n_saved}/{total} images saved.",
         )
         if reply != QtWidgets.QMessageBox.Yes:
             return
 
-        session.delete_all_cached_features()
+        # Keep the cached UNI2 embeddings (stored on the HDD) so this series stays instant to reopen.
+        # Back up the finished case's sidecar (HPC + HDD) before moving on — including the last case.
+        self._sync_case(session.out_path)
         next_path = _next_h5(session.h5_path)
         if next_path is None:
             show_info(
@@ -1178,6 +1432,7 @@ class HistopathologyAnnotator(_ClassifierBase):
         self._session = session
         self._next_button = None
         self._load_button = None
+        self._review_checkbox = None
         super().__init__(viewer)
 
         # Load UNI2 once; its features drive the pixel classifier (computed lazily in
@@ -1201,8 +1456,9 @@ class HistopathologyAnnotator(_ClassifierBase):
                 5, min(int(min_side * 0.01), 100)
             )
 
-        # Now that all widgets exist, set the first image's load-button visibility.
+        # Now that all widgets exist, set the first image's load-button visibility and review flag.
         self._update_status()
+        self._refresh_review_checkbox()
 
 
 # ---------------------------------------------------------------------------
@@ -1210,21 +1466,27 @@ class HistopathologyAnnotator(_ClassifierBase):
 # ---------------------------------------------------------------------------
 
 
-def precompute_features(session, verbose=True):
-    """Compute and cache UNI2 features for every ROI in the session's h5 file.
+def precompute_session_features(
+    session, model, holder, device, position=1, leave=False
+):
+    """Compute and cache UNI2 features for every ROI in one session's h5 file.
 
-    Run this before annotating (``--precompute``) so the first RF training on each image loads
-    features from the h5 cache instead of waiting for the ~20s UNI2 forward pass. Cached entries are
-    removed automatically once an image's prediction is saved.
+    Shows a per-sample tqdm bar at ``position`` with ``leave=False`` so that, when driving a whole
+    folder, the bar is cleared and reused for the next file (replaced, not stacked) beneath the
+    global file bar. ``model``/``holder``/``device`` are passed in so UNI2 is loaded only once.
     """
-    device = util.get_device()
-    model, holder = load_uni(device)
     original_idx = session.current_idx
-    for idx in range(session.n_images):
+    bar = tqdm(
+        range(session.n_images),
+        position=position,
+        leave=leave,
+        desc=Path(session.h5_path).stem,
+        unit="img",
+    )
+    for idx in bar:
         name = session._names[idx]
-        if session.load_cached_features(name) is not None:
-            if verbose:
-                print(f"[{idx + 1}/{session.n_images}] already cached: {name}")
+        if session.has_cached_features(name):
+            bar.set_postfix_str("cached")
             continue
         session.current_idx = idx
         roi_img, _ = session.get_current_roi()
@@ -1232,9 +1494,36 @@ def precompute_features(session, verbose=True):
             model, holder, roi_img, device
         )
         session.save_cached_features(name, features, grid_shape)
-        if verbose:
-            print(f"[{idx + 1}/{session.n_images}] cached: {name}")
+        bar.set_postfix_str("computed")
+    bar.close()
     session.current_idx = original_idx
+
+
+def precompute_folder(folder):
+    """Precompute + cache UNI2 features for every input ``*.h5`` in ``folder``.
+
+    A global tqdm bar tracks files (position 0); each file's per-sample bar (position 1) is replaced
+    as the run advances. UNI2 is loaded once and reused across all files.
+    """
+    folder = Path(folder)
+    files = sorted(
+        p
+        for p in folder.glob("*.h5")
+        if not p.name.endswith((".annot.h5", ".unicache.h5"))
+    )
+    if not files:
+        raise SystemExit(f"No input .h5 files found in {folder}")
+    if UNI_CACHE_DIR is None:
+        print(
+            "WARNING: UNI_CACHE_DIR is None → embeddings cache to the system temp dir and may be "
+            "cleared on reboot. Set UNI_CACHE_DIR to a persistent folder to keep them."
+        )
+    device = util.get_device()
+    model, holder = load_uni(device)
+    for path in tqdm(files, position=0, desc="h5 files", unit="file"):
+        precompute_session_features(
+            HistopathologySession(path), model, holder, device, position=1
+        )
 
 
 def main(h5_path=None):
@@ -1269,7 +1558,12 @@ def main(h5_path=None):
     # Create and inject the first image: the whole padded image as context, and the ROI (which
     # drives embeddings and prediction) overlaid at its center via 'translate'.
     full_image, image, mask = session.get_current()
-    session.roi_mask = mask
+    saved_mask = session.load_saved_mask(session._names[0])
+    session.roi_mask = (
+        saved_mask
+        if saved_mask is not None and saved_mask.shape == mask.shape
+        else mask
+    )
     viewer.add_image(full_image, name="context", rgb=True)
     viewer.add_image(
         image, name="image", rgb=True, translate=session.roi_offset
@@ -1302,15 +1596,32 @@ if __name__ == "__main__":
 
     args = sys.argv[1:]
     if "--precompute" in args:
-        # Precompute and cache UNI2 features for the whole h5 file, then exit (no GUI).
+        # Precompute + cache UNI2 features, then exit (no GUI). With no path arg, process every h5 in
+        # PRECOMPUTE_DIR; a path arg may be a folder (all its h5s) or a single h5 file.
         args = [a for a in args if a != "--precompute"]
-        if not args:
-            raise SystemExit(
-                "Usage: histopathology_classifier.py --precompute <file.h5>"
+        target = Path(args[0]) if args else Path(PRECOMPUTE_DIR)
+        if not target.exists():
+            raise SystemExit(f"path not found: {target}")
+        try:
+            if target.is_dir():
+                precompute_folder(target)
+            else:
+                device = util.get_device()
+                model, holder = load_uni(device)
+                precompute_session_features(
+                    HistopathologySession(target),
+                    model,
+                    holder,
+                    device,
+                    position=0,
+                    leave=True,
+                )
+        except KeyboardInterrupt:
+            # Each finished tile is flushed to its own cache file, so whatever completed is kept;
+            # rerun the same command to resume from the first uncached tile.
+            print(
+                "\nInterrupted — cached features so far are saved; rerun to resume."
             )
-        h5 = Path(args[0])
-        if not h5.exists():
-            raise SystemExit(f"h5 file not found: {h5}")
-        precompute_features(HistopathologySession(h5))
+            raise SystemExit(130)
     else:
         main(args[0] if args else None)
